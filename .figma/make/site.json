@@ -1,0 +1,10 @@
+{
+  "description": "Manage pantry inventory with image recognition, track expiration and stock, and get Filipino recipe recommendations to reduce food waste and simplify cooking.",
+  "robots": {
+    "index": false
+  },
+  "accessibility": {
+    "addBypassLinks": false,
+    "ignoreReducedMotion": false
+  }
+}
