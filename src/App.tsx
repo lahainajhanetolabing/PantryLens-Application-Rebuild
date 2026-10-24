@@ -1,3 +1,4 @@
+import { supabase } from "./lib/supabase";
 import { useEffect, useRef, useState, type ReactNode } from "react";
 import {
   AlertTriangle,
@@ -229,26 +230,291 @@ function Landing({ onEnter, onAuth }: { onEnter: () => void; onAuth: (mode: "log
   </main>;
 }
 
-function AuthModal({ mode, onClose, onSuccess }: { mode: "login" | "signup"; onClose: () => void; onSuccess: () => void }) {
+
+function AuthModal({
+  mode,
+  onClose,
+  onSuccess,
+}: {
+  mode: "login" | "signup";
+  onClose: () => void;
+  onSuccess: () => void;
+}) {
   const [showPassword, setShowPassword] = useState(false);
   const [forgot, setForgot] = useState(false);
   const [busy, setBusy] = useState(false);
-  const submit = (event: React.FormEvent) => { event.preventDefault(); setBusy(true); window.setTimeout(() => { setBusy(false); onSuccess(); }, 700); };
-  return <Modal title={forgot ? "Reset your password" : mode === "login" ? "Welcome back" : "Create your PantryLens account"} onClose={onClose}>
-    <p className="modal-subtitle">{forgot ? "We’ll send reset instructions in a production Supabase integration." : mode === "login" ? "Use the demo account to explore the full owner experience." : "Start independently now. You can create or join a household later."}</p>
-    <form className="form-stack" onSubmit={forgot ? (event) => { event.preventDefault(); setForgot(false); } : submit}>
-      {mode === "signup" && !forgot && <Input label="Full name" placeholder="Juan Dela Cruz" required />}
-      <Input label="Email address" type="email" placeholder="you@example.com" defaultValue={mode === "login" ? "demo@pantrylens.app" : ""} required />
-      {!forgot && <label className="field"><span>Password</span><div className="input-wrap"><input type={showPassword ? "text" : "password"} defaultValue={mode === "login" ? "PantryDemo1!" : ""} placeholder="At least 8 characters" required minLength={8} /><button type="button" className="field-icon" onClick={() => setShowPassword(!showPassword)} aria-label="Toggle password visibility">{showPassword ? <EyeOff size={18} /> : <Eye size={18} />}</button></div></label>}
-      {mode === "signup" && !forgot && <><Input label="Confirm password" type="password" placeholder="Repeat your password" required minLength={8} /><div className="password-rules"><span><Check size={14} /> 8+ characters</span><span><Check size={14} /> Uppercase and number</span></div><label className="checkbox"><input type="checkbox" required /><span>I accept the Terms of Use and Privacy Notice.</span></label></>}
-      {mode === "login" && !forgot && <button type="button" className="text-link align-right" onClick={() => setForgot(true)}>Forgot password?</button>}
-      <Button type="submit" disabled={busy}>{busy ? <><RefreshCw className="spin" size={17} /> Authenticating…</> : forgot ? "Send reset link" : mode === "login" ? "Log in to demo" : "Create demo account"}</Button>
-      <div className="auth-note"><ShieldCheck size={16} /><span>Prototype only. Authentication and account writes are simulated until Supabase Auth is connected.</span></div>
-    </form>
-  </Modal>;
+  const [name, setName] = useState("");
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [error, setError] = useState("");
+  const [message, setMessage] = useState("");
+
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    setError("");
+    setMessage("");
+
+    const cleanEmail = email.trim();
+
+    if (!cleanEmail) {
+      setError("Please enter your email address.");
+      return;
+    }
+
+    if (!forgot && password.length < 8) {
+      setError("Your password must contain at least 8 characters.");
+      return;
+    }
+
+    if (mode === "signup" && !forgot) {
+      if (!name.trim()) {
+        setError("Please enter your full name.");
+        return;
+      }
+
+      if (password !== confirmPassword) {
+        setError("Your passwords do not match.");
+        return;
+      }
+
+      if (!/[A-Z]/.test(password) || !/[0-9]/.test(password)) {
+        setError("Use at least one uppercase letter and one number in your password.");
+        return;
+      }
+    }
+
+    setBusy(true);
+
+    try {
+      if (forgot) {
+        const { error: resetError } =
+          await supabase.auth.resetPasswordForEmail(cleanEmail, {
+            redirectTo: window.location.origin,
+          });
+
+        if (resetError) throw resetError;
+
+        setMessage("If an account exists for this email, password reset instructions will be sent.");
+        return;
+      }
+
+      if (mode === "login") {
+        const { error: loginError } =
+          await supabase.auth.signInWithPassword({
+            email: cleanEmail,
+            password,
+          });
+
+        if (loginError) throw loginError;
+
+        onSuccess();
+        return;
+      }
+
+      const { data, error: signupError } =
+        await supabase.auth.signUp({
+          email: cleanEmail,
+          password,
+          options: {
+            data: {
+              full_name: name.trim(),
+            },
+            emailRedirectTo: window.location.origin,
+          },
+        });
+
+      if (signupError) throw signupError;
+
+      if (data.session) {
+        onSuccess();
+      } else {
+        setMessage(
+          "Your account request was received. Check your email for a confirmation link before logging in."
+        );
+      }
+    } catch (err) {
+      const errorMessage =
+        err instanceof Error
+          ? err.message
+          : "Something went wrong. Please try again.";
+
+      setError(errorMessage);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <Modal
+      title={
+        forgot
+          ? "Reset your password"
+          : mode === "login"
+            ? "Welcome back"
+            : "Create your PantryLens account"
+      }
+      onClose={onClose}
+    >
+      <p className="modal-subtitle">
+        {forgot
+          ? "Enter your email address to request a password reset."
+          : mode === "login"
+            ? "Log in to access your PantryLens account."
+            : "Create your account to get started. You can create or join a household later."}
+      </p>
+
+      <form className="form-stack" onSubmit={submit}>
+        {mode === "signup" && !forgot && (
+          <label className="field">
+            <span>Full name</span>
+            <input
+              type="text"
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+              placeholder="Juan Dela Cruz"
+              autoComplete="name"
+              required
+            />
+          </label>
+        )}
+
+        <label className="field">
+          <span>Email address</span>
+          <input
+            type="email"
+            value={email}
+            onChange={(event) => setEmail(event.target.value)}
+            placeholder="you@example.com"
+            autoComplete="email"
+            required
+          />
+        </label>
+
+        {!forgot && (
+          <label className="field">
+            <span>Password</span>
+            <div className="input-wrap">
+              <input
+                type={showPassword ? "text" : "password"}
+                value={password}
+                onChange={(event) => setPassword(event.target.value)}
+                placeholder="At least 8 characters"
+                autoComplete={
+                  mode === "login" ? "current-password" : "new-password"
+                }
+                minLength={8}
+                required
+              />
+              <button
+                type="button"
+                className="field-icon"
+                onClick={() => setShowPassword(!showPassword)}
+                aria-label="Toggle password visibility"
+              >
+                {showPassword ? (
+                  <EyeOff size={18} />
+                ) : (
+                  <Eye size={18} />
+                )}
+              </button>
+            </div>
+          </label>
+        )}
+
+        {mode === "signup" && !forgot && (
+          <>
+            <label className="field">
+              <span>Confirm password</span>
+              <input
+                type="password"
+                value={confirmPassword}
+                onChange={(event) =>
+                  setConfirmPassword(event.target.value)
+                }
+                placeholder="Repeat your password"
+                autoComplete="new-password"
+                minLength={8}
+                required
+              />
+            </label>
+
+            <div className="password-rules">
+              <span><Check size={14} /> 8+ characters</span>
+              <span><Check size={14} /> Uppercase and number</span>
+            </div>
+
+            <label className="checkbox">
+              <input type="checkbox" required />
+              <span>I accept the Terms of Use and Privacy Notice.</span>
+            </label>
+          </>
+        )}
+
+        {mode === "login" && !forgot && (
+          <button
+            type="button"
+            className="text-link align-right"
+            onClick={() => {
+              setForgot(true);
+              setError("");
+              setMessage("");
+            }}
+          >
+            Forgot password?
+          </button>
+        )}
+
+        {error && (
+          <p role="alert" className="auth-error">
+            {error}
+          </p>
+        )}
+
+        {message && (
+          <p role="status" className="auth-note">
+            {message}
+          </p>
+        )}
+
+        <Button type="submit" disabled={busy}>
+          {busy
+            ? "Please wait..."
+            : forgot
+              ? "Send reset link"
+              : mode === "login"
+                ? "Log in"
+                : "Create account"}
+        </Button>
+
+        {forgot && (
+          <button
+            type="button"
+            className="text-link"
+            onClick={() => {
+              setForgot(false);
+              setError("");
+              setMessage("");
+            }}
+          >
+            Back to login
+          </button>
+        )}
+
+        <div className="auth-note">
+          <ShieldCheck size={16} />
+          <span>
+            Authentication is handled by Supabase. Never share your password
+            with anyone.
+          </span>
+        </div>
+      </form>
+    </Modal>
+  );
 }
 
-function AppShell({ role, onRoleChange, onExit }: { role: Role; onRoleChange: (role: Role) => void; onExit: () => void }) {
+
+function AppShell({ role, user, onRoleChange, onExit }: { role: Role; user: { id: string; email?: string; user_metadata?: { full_name?: string } } | null; onRoleChange: (role: Role) => void; onExit: () => void }) {
   const [view, setView] = useState<View>(role === "admin" ? "admin" : "dashboard");
   const [items, setItems] = useState(initialItems);
   const [workspace, setWorkspace] = useState<Workspace>(role === "owner" ? "personal" : "household");
@@ -303,7 +569,9 @@ function AppShell({ role, onRoleChange, onExit }: { role: Role; onRoleChange: (r
     if (view === "shopping") return <ShoppingList role={role} gated={gated} notify={notify} />;
     if (view === "household") return <Household role={role} workspace={workspace} setWorkspace={setWorkspace} gated={gated} notify={notify} navigate={navigate} />;
     if (view === "notifications") return <Notifications count={notificationCount} setCount={setNotificationCount} role={role} gated={gated} />;
-    if (view === "settings") return <SettingsPage role={role} workspace={workspace} gated={gated} notify={notify} />;
+    if (view === "settings") {
+      return <SettingsPage role={role} workspace={workspace} gated={gated} notify={notify} user={user} />;
+    }
     return <AdminPage notify={notify} />;
   };
 
@@ -343,7 +611,22 @@ function AppShell({ role, onRoleChange, onExit }: { role: Role; onRoleChange: (r
         <div className="top-actions">
           {(role === "owner" || role === "guest") && <Button className="top-add" onClick={() => gated(() => navigate("add"))} icon={<Plus size={17} />}>Add item</Button>}
           <button className="icon-btn notification-btn" aria-label="Notifications" onClick={() => navigate("notifications")}><Bell size={20} />{notificationCount > 0 && <span>{notificationCount}</span>}</button>
-          <div className="profile-menu"><button className="profile-trigger" onClick={() => setProfileOpen(!profileOpen)} aria-expanded={profileOpen} aria-label="Open profile menu"><span className="profile-avatar">{role === "admin" ? "AD" : role === "member" ? "MD" : role === "guest" ? "GU" : "JD"}</span><span><b>{role === "admin" ? "System Admin" : role === "member" ? "Maria Dela Cruz" : role === "guest" ? "Guest visitor" : "Juan Dela Cruz"}</b><small>{role === "guest" ? "Preview mode" : role === "member" ? "Household member" : "demo@pantrylens.app"}</small></span><ChevronDown size={16} /></button>
+          <div className="profile-menu"><button className="profile-trigger" onClick={() => setProfileOpen(!profileOpen)} aria-expanded={profileOpen} aria-label="Open profile menu"><span className="profile-avatar">{role === "admin" ? "AD" : role === "member" ? "MD" : role === "guest" ? "GU" : (user?.user_metadata?.full_name || "Juan Dela Cruz").split(/\s+/).map((name) => name[0]).join("").slice(0, 2).toUpperCase()}</span><span><b>
+  {role === "admin"
+    ? "System Admin"
+    : role === "member"
+      ? "Maria Dela Cruz"
+      : role === "guest"
+        ? "Guest visitor"
+        : user?.user_metadata?.full_name || user?.email || "My account"}
+</b>
+<small>
+  {role === "guest"
+    ? "Preview mode"
+    : role === "member"
+      ? "Household member"
+      : user?.email || "No email available"}
+</small></span><ChevronDown size={16} /></button>
           {profileOpen && <div className="profile-popover"><button onClick={() => { navigate("settings"); setProfileOpen(false); }}><User size={17} /> Profile & settings</button>{role !== "admin" && role !== "member" && <button onClick={() => switchRole("member", "dashboard")}><Users size={17} /> Open member demo</button>}{role === "member" && <button onClick={() => switchRole("owner", "dashboard")}><ArrowLeft size={17} /> Exit member demo</button>}<button onClick={() => role === "admin" ? switchRole("guest", "dashboard") : switchRole("admin", "admin")}><ShieldCheck size={17} /> {role === "admin" ? "Exit admin preview" : "Open admin demo"}</button><button onClick={onExit}><LogOut size={17} /> Log out / exit</button></div>}</div>
         </div>
       </header>
@@ -380,7 +663,7 @@ function Dashboard({ navigate, role, items }: { navigate: (view: View) => void; 
       <Card className="quick-card"><div className="card-heading"><div><h2>Quick actions</h2><p>{role === "member" ? "Work with records shared with you." : "Keep your pantry up to date."}</p></div></div>{role === "member" ? <div className="quick-grid"><button onClick={() => navigate("shared")}><span><Warehouse /></span><b>Shared pantry</b><small>View authorized items</small></button><button onClick={() => navigate("usage")}><span><TrendingDown /></span><b>Record usage</b><small>Update shared quantities</small></button><button onClick={() => navigate("recipes")}><span><Utensils /></span><b>Find a recipe</b><small>Use shared ingredients</small></button><button onClick={() => navigate("monitoring")}><span><Clock3 /></span><b>Food alerts</b><small>Review relevant items</small></button></div> : <div className="quick-grid"><button onClick={() => navigate("scan")}><span><ScanLine /></span><b>Scan food</b><small>Use a photo</small></button><button onClick={() => navigate("add")}><span><Plus /></span><b>Add manually</b><small>Enter details</small></button><button onClick={() => navigate("recipes")}><span><Utensils /></span><b>Find a recipe</b><small>Cook what you have</small></button><button onClick={() => navigate("shopping")}><span><ShoppingBasket /></span><b>Shopping list</b><small>3 to pick up</small></button></div>}</Card>
     </div>
     <div className="section-heading"><div><h2>Made for your pantry</h2><p>Recipes ranked by your available ingredients.</p></div><button onClick={() => navigate("recipes")}>Browse all recipes <ChevronRight size={16} /></button></div>
-    <div className="dash-recipes">{recipes.slice(0, 3).map((recipe) => <article key={recipe.id} onClick={() => navigate("recipe")}><div className="recipe-img"><img src={recipe.image} alt={recipe.name} /><Badge tone="success">{recipe.match}% match</Badge><button aria-label="Save recipe" onClick={(event) => { event.stopPropagation(); navigate("recipe"); }}><Heart size={17} /></button></div><div><h3>{recipe.name}</h3><p>{recipe.description}</p><span><Clock3 size={15} />{recipe.time}</span><span>{recipe.level}</span></div></article>)}</div>
+    <div className="dash-recipes">{recipes.slice(0, 3).map((recipe) => <article key={recipe.id} onClick={() => navigate("recipe")}><div className="recipe-img"><img src={recipe.image} alt={recipe.name} /><Badge tone="success">{recipe.match}% match</Badge><button aria-label="Save recipe" onClick={(event) => { event.stopPropagation(); navigate("recipe"); }}><Heart size={17} /></button></div><div><h3>{recipe.name}</h3><p>{recipe.description}</p><span>{recipe.time} · {recipe.level}</span></div></article>)}</div>
     <Card className="activity-card"><div className="card-heading"><div><h2>Recent pantry activity</h2><p>Latest updates from your household.</p></div><button onClick={() => navigate("usage")}>View history <ChevronRight size={16} /></button></div><div className="activity-row"><span className="activity-icon consumed"><Minus /></span><div><b>Maria recorded 2 eggs used</b><small>Today, 8:40 AM · Breakfast</small></div><Badge>Usage</Badge></div><div className="activity-row"><span className="activity-icon added"><Plus /></span><div><b>You added chicken thighs</b><small>Yesterday, 6:12 PM · Freezer</small></div><Badge tone="success">Added</Badge></div></Card>
   </>;
 }
@@ -428,7 +711,14 @@ function ScanPage({ role, gated, notify, navigate }: { role: Role; gated: (fn: (
 
 function DetectedItem({ name, confidence, icon }: { name: string; confidence: number; icon: string }) {
   const [open, setOpen] = useState(true);
-  return <div className="detected-item"><button className="detected-head" onClick={() => setOpen(!open)}><span>{icon}</span><span><b>{name}</b><small>{confidence}% confidence</small></span><Badge tone="success">High confidence</Badge><ChevronDown className={open ? "rotate" : ""} size={18} /></button>{open && <div className="detected-form"><Input label="Food name" defaultValue={name} /><Select label="Category" defaultValue="Vegetables">{categories.map((c) => <option key={c}>{c}</option>)}</Select><div className="split-fields"><Input label="Quantity" type="number" defaultValue="2" min="0" /><Select label="Unit" defaultValue="pcs"><option>pcs</option><option>kg</option><option>g</option><option>bunch</option></Select></div><Select label="Storage location"><option>Refrigerator</option>{locations.map((l) => <option key={l}>{l}</option>)}</Select><Input label="Expiration date (from packaging, if known)" type="date" /><p className="field-help">A food photo cannot reliably reveal its actual expiration date.</p></div>}</div>;
+  const [defaults] = useState(() => {
+    try {
+      return { ...defaultSettings("owner"), ...JSON.parse(window.localStorage.getItem("pantrylens-settings-owner") || "{}") } as SettingsData;
+    } catch {
+      return defaultSettings("owner");
+    }
+  });
+  return <div className="detected-item"><button className="detected-head" onClick={() => setOpen(!open)}><span>{icon}</span><span><b>{name}</b><small>{confidence}% confidence</small></span><Badge tone="success">High confidence</Badge><ChevronDown className={open ? "rotate" : ""} size={18} /></button>{open && <div className="detected-form"><Input label="Food name" defaultValue={name} /><Select label="Category" defaultValue="Vegetables">{categories.map((c) => <option key={c}>{c}</option>)}</Select><div className="split-fields"><Input label="Quantity" type="number" defaultValue="2" min="0" /><Select label="Unit" defaultValue={defaults.units === "Metric" ? "kilograms" : "pieces"}><option>pieces</option><option>kilograms</option><option>grams</option><option>liters</option><option>milliliters</option><option>cans</option><option>packs</option><option>bunches</option></Select></div><Select label="Storage location"><option>Refrigerator</option>{locations.map((l) => <option key={l}>{l}</option>)}</Select><Input label="Expiration date (from packaging, if known)" type="date" /><p className="field-help">A food photo cannot reliably reveal its actual expiration date.</p></div>}</div>;
 }
 
 function AddItem({ role, gated, notify, navigate }: { role: Role; gated: (fn: () => void) => void; notify: (text: string) => void; navigate: (v: View) => void }) {
@@ -475,7 +765,7 @@ function UsageHistory({ role, gated, notify }: { role: Role; gated: (fn: () => v
   return <>
     <PageHeader eyebrow="Inventory audit" title="Food usage history" description="Track what changed, when it changed, and who recorded it." actions={<Button onClick={() => gated(() => setModal(true))} icon={<Minus size={17} />}>Record food usage</Button>} />
     <Card className="inventory-toolbar usage-filters"><Input aria-label="Search usage history" placeholder="Search usage…" value={query} onChange={(event) => setQuery(event.target.value)} icon={<Search size={18} />} /><Select aria-label="Filter usage by item" value={itemFilter} onChange={(event) => setItemFilter(event.target.value)}><option>All items</option><option>Eggs</option><option>Chicken thighs</option><option>Rice</option><option>Pechay</option></Select><Select aria-label="Filter usage by member" value={memberFilter} onChange={(event) => setMemberFilter(event.target.value)}><option>All members</option><option>Juan</option><option>Maria</option></Select><Input aria-label="Filter usage by date" type="date" value={dateFilter} onChange={(event) => setDateFilter(event.target.value)} /></Card>
-    <Card className="timeline-card">{filteredHistory.map((row) => <div className="history-row" key={row.time}><span className={row.added ? "add" : "consume"}>{row.added ? <Plus /> : <Minus />}</span><div><small>{row.time}</small><h3>{row.item}</h3><p>{row.change} · {row.note}</p></div><div><small>Recorded by</small><b>{row.member}</b></div><button aria-label={`View ${row.item} history details`} onClick={() => notify(`${row.item} history detail opened`)}><ChevronRight /></button></div>)}{filteredHistory.length === 0 && <div className="empty-state compact"><Search /><h3>No usage records found</h3><p>Change or clear the current filters.</p><Button variant="secondary" onClick={() => { setQuery(""); setItemFilter("All items"); setMemberFilter("All members"); setDateFilter(""); }}>Clear filters</Button></div>}</Card>
+    <Card className="timeline-card">{filteredHistory.map((row) => <div className="history-row" key={row.time}><span className={row.added ? "add" : "consume"}>{row.added ? <Plus /> : <Minus />}</span><div><small>{row.time}</small><h3>{row.item}</h3><p>{row.change} · {row.note}</p></div><div><small>Recorded by</small><b>{row.member}</b></div><button aria-label={`View ${row.item} history details`} onClick={() => notify(`${row.item} history detail opened`)}><ChevronRight /></button></div>)}{filteredHistory.length === 0 && <div className="empty-state compact"><CheckCircle2 /><h3>Nothing to review here</h3><p>Your pantry has no items in this state.</p></div>}</Card>
     {modal && <Modal title="Record food usage" onClose={() => setModal(false)}><form className="form-stack" onSubmit={(e) => { e.preventDefault(); setModal(false); notify("Usage recorded; quantity updated in demo"); }}><Select label="Food item *"><option>Eggs · 8 pcs available</option><option>Chicken thighs · 1.2 kg available</option></Select><div className="split-fields"><Input label="Quantity used *" type="number" min="0.01" max="8" required /><Select label="Unit"><option>pcs</option><option>kg</option></Select></div><Input label="Usage date *" type="date" required /><Select label="Used by"><option>Current user — Juan</option><option>Maria Dela Cruz</option></Select><Input label="Notes" placeholder="e.g. Breakfast" /><p className="field-help">PantryLens prevents usage from reducing available quantity below zero.</p><div className="modal-actions"><Button variant="secondary" onClick={() => setModal(false)}>Cancel</Button><Button type="submit">Record usage</Button></div></form></Modal>}
   </>;
 }
@@ -489,7 +779,7 @@ function Recipes({ navigate, role, gated, notify }: { navigate: (v: View) => voi
   const filtered = recipes.filter((r) => r.name.toLowerCase().includes(query.toLowerCase()) && (meal === "Any meal type" || r.meal === meal) && (prep === "Any prep time" || parseInt(r.time) <= +(prep.match(/\d+/)?.[0] || 999)) && (difficulty === "Any difficulty" || r.level === difficulty) && (!pantryMatches || r.match >= 75));
   return <>
     <PageHeader eyebrow="Recipe discovery" title="What can we cook?" description="Recommendations compare required ingredients against authorized available inventory." actions={<Button variant="secondary" onClick={() => notify("Showing saved recipe preview")} icon={<Heart size={17} />}>Saved recipes</Button>} />
-    <Card className="recipe-hero-card"><div><Badge tone="success"><Sparkles size={14} /> Top pantry match</Badge><h2>Chicken Adobo</h2><p>You already have 4 of 5 required ingredients. Add bay leaves and dinner is sorted.</p><div><span><Clock3 size={16} /> 45 min</span><span>Easy</span><span>4 servings</span></div><Button onClick={() => navigate("recipe")}>View recipe</Button></div><img src={RECIPE_IMAGES[0]} alt="Chicken adobo recommendation" /></Card>
+    <Card className="recipe-hero-card"><div><Badge tone="success"><Sparkles size={14} /> Top pantry match</Badge><h2>Chicken Adobo</h2><p>You already have 4 of 5 required ingredients. Add bay leaves and dinner is sorted.</p><div className="recipe-stats"><span><Clock3 /> <b>15 min</b><small>Prep</small></span><span><Zap /> <b>30 min</b><small>Cook</small></span><span><Utensils /> <b>Easy</b><small>Difficulty</small></span></div><div className="hero-actions"><Button onClick={() => gated(() => notify("Chicken Adobo saved"))} icon={<Heart size={17} />}>Save recipe</Button><Button variant="secondary" onClick={() => notify("Print preview is ready")} icon={<FileText size={17} />}>Print</Button></div></div></Card>
     <Card className="recipe-filters"><Input aria-label="Search recipes" placeholder="Search Filipino recipes…" value={query} onChange={(e) => setQuery(e.target.value)} icon={<Search size={18} />} /><Select aria-label="Filter recipes by meal type" value={meal} onChange={(event) => setMeal(event.target.value)}><option>Any meal type</option><option>Dinner</option><option>Lunch</option><option>Breakfast</option></Select><Select aria-label="Filter recipes by preparation time" value={prep} onChange={(event) => setPrep(event.target.value)}><option>Any prep time</option><option>Under 30 min</option><option>Under 60 min</option></Select><Select aria-label="Filter recipes by difficulty" value={difficulty} onChange={(event) => setDifficulty(event.target.value)}><option>Any difficulty</option><option>Easy</option><option>Medium</option></Select><Button variant={pantryMatches ? "soft" : "secondary"} onClick={() => setPantryMatches(!pantryMatches)} icon={<Filter size={16} />}>{pantryMatches ? "Pantry matches on" : "Pantry matches only"}</Button></Card>
     <div className="recipe-grid">{filtered.map((recipe) => <article key={recipe.id} className="recipe-card"><div className="recipe-img"><img src={recipe.image} alt={recipe.name} /><div className="match-ring">{recipe.match}<small>%</small></div><button aria-label={`Save ${recipe.name}`} onClick={() => gated(() => notify(`${recipe.name} saved to favorites`))}><Heart size={17} /></button></div><div><div className="recipe-kicker"><Badge tone={recipe.match > 85 ? "success" : "warning"}>{recipe.match > 85 ? "Great match" : "Good match"}</Badge><span><Clock3 size={14} />{recipe.time}</span></div><h2>{recipe.name}</h2><p>{recipe.description}</p><div className="ingredient-summary"><span className="have"><Check size={14} /> {recipe.available.length} available</span><span className="missing"><Plus size={14} /> {recipe.missing.length} missing</span></div><Button variant="secondary" onClick={() => navigate("recipe")}>View recipe <ChevronRight size={16} /></Button></div></article>)}</div>
     {filtered.length === 0 && <Card className="empty-state"><Search /><h2>No recipes match these filters</h2><p>Try a different meal, preparation time, or pantry match.</p><Button variant="secondary" onClick={() => { setQuery(""); setMeal("Any meal type"); setPrep("Any prep time"); setDifficulty("Any difficulty"); setPantryMatches(false); }}>Clear filters</Button></Card>}
@@ -589,8 +879,50 @@ function defaultSettings(role: Role): SettingsData {
   };
 }
 
-function SettingsPage({ role, workspace, gated, notify }: { role: Role; workspace: Workspace; gated: (fn: () => void) => void; notify: (s: string) => void }) {
+
+function SettingsPage({
+  role,
+  workspace,
+  gated,
+  notify,
+  user,
+}: {
+  role: Role;
+  workspace: Workspace;
+  gated: (fn: () => void) => void;
+  notify: (s: string) => void;
+  user: {
+    id: string;
+    email?: string;
+    created_at?: string;
+    user_metadata?: {
+      full_name?: string;
+      name?: string;
+    };
+  } | null;
+}) {
+
   const storageKey = `pantrylens-settings-${role}`;
+  
+  const accountName =
+    user?.user_metadata?.full_name ||
+    user?.user_metadata?.name ||
+    user?.email ||
+    "";
+
+  const accountEmail = user?.email || "";
+
+  const accountInitials = accountName
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((part) => part[0].toUpperCase())
+    .join("");
+
+  const accountCreated = user?.created_at
+    ? new Date(user.created_at).toLocaleDateString()
+    : "Unavailable";
+
   const loadSettings = () => {
     try {
       const stored = window.localStorage.getItem(storageKey);
@@ -656,7 +988,20 @@ function SettingsPage({ role, workspace, gated, notify }: { role: Role; workspac
   return <>
     <PageHeader eyebrow={role === "admin" ? "Protected administration" : "Preferences"} title={role === "admin" ? "Administrator settings" : "Settings"} description={role === "admin" ? "Configure administrative preferences without exposing household-private data." : "Saved preferences persist on this device; backend-dependent features are clearly marked."} />
     <div className="settings-layout"><aside className="settings-nav">{sections.map((item) => <button className={section === item ? "active" : ""} onClick={() => selectSection(item)} key={item}>{item}<ChevronRight size={16} /></button>)}</aside><Card className="settings-content">
-      {section === "Account" && <SettingsSection title="Account and profile" description="Update personal details. Email and password changes require secure identity verification."><div className="profile-photo-row"><span>{role === "member" ? "MD" : "JD"}</span><div><b>Profile photo</b><p>{draft.photoName || "JPG or PNG, up to 5 MB"}</p></div><input ref={photoRef} className="visually-hidden" type="file" accept="image/png,image/jpeg" onChange={(event) => handlePhoto(event.target.files?.[0])} /><Button variant="secondary" onClick={() => gated(() => photoRef.current?.click())}>Choose photo</Button></div><Input label="Full name *" value={draft.fullName} onChange={(event) => update("fullName", event.target.value)} /><Input label="Email address *" type="email" value={draft.email} onChange={(event) => update("email", event.target.value)} /><BackendNotice text="Changing email requires a verification message from Supabase Auth. This prototype saves only the preference and does not send email." /><div className="split-fields"><Input label="Account created" value="August 24, 2026" disabled /><Button variant="secondary" onClick={() => gated(() => { setDialogError(""); setDialog("password"); })}>Change password</Button></div></SettingsSection>}
+      {section === "Account" && <SettingsSection title="Account and profile" description="Update personal details. Email and password changes require secure identity verification."><div className="profile-photo-row"><span>{accountInitials || "U"}</span><div><b>Profile photo</b><p>{draft.photoName || "JPG or PNG, up to 5 MB"}</p></div><input ref={photoRef} className="visually-hidden" type="file" accept="image/png,image/jpeg" onChange={(event) => handlePhoto(event.target.files?.[0])} /><Button variant="secondary" onClick={() => gated(() => photoRef.current?.click())}>Choose photo</Button></div><Input
+  label="Full name *"
+  value={accountName}
+  disabled
+/><Input
+  label="Email address *"
+  type="email"
+  value={accountEmail}
+  disabled
+/><BackendNotice text="Changing email requires a verification message from Supabase Auth. This prototype saves only the preference and does not send email." /><div className="split-fields"><Input
+  label="Account created"
+  value={accountCreated}
+  disabled
+/><Button variant="secondary" onClick={() => gated(() => { setDialogError(""); setDialog("password"); })}>Change password</Button></div></SettingsSection>}
       {section === "Appearance" && <SettingsSection title="Appearance" description="Theme and density preview immediately. Save to keep them on this device."><OptionCards options={[["Light", Sun], ["Dark", Moon], ["System", Settings]]} active={draft.theme} onChange={(value) => update("theme", value as SettingsData["theme"])} /><Select label="Interface density" value={draft.density} onChange={(event) => update("density", event.target.value as SettingsData["density"])}><option>Comfortable</option><option>Compact</option></Select><div className="settings-preview"><span className="preview-swatch" /><div><b>Live interface preview</b><p>Cards, controls, spacing, and contrast update before saving. Cancel restores the saved appearance.</p></div></div></SettingsSection>}
       {section === "Accessibility" && <SettingsSection title="Accessibility" description="Adjust readability and motion while preserving keyboard navigation."><SettingToggle label="Enhanced contrast" detail="Increase borders and text separation." checked={draft.contrast} onChange={(value) => update("contrast", value)} /><SettingToggle label="Larger interface text" detail="Increase the base text scale throughout the application." checked={draft.largeText} onChange={(value) => update("largeText", value)} /><SettingToggle label="Reduce motion" detail="Disable nonessential transitions and animations." checked={draft.reduceMotion} onChange={(value) => update("reduceMotion", value)} /><div className="auth-note"><CircleHelp size={16} />These preferences apply locally. Operating-system and browser accessibility settings continue to take priority.</div></SettingsSection>}
       {section === "Notifications" && <SettingsSection title="Notification preferences" description="In-app preferences work locally. External delivery requires configured providers."><SettingToggle label="Expiration alerts" detail="Show in-app alerts before food expires." checked={draft.expirationAlerts} onChange={(value) => update("expirationAlerts", value)} /><SettingToggle label="Low-stock alerts" detail="Show in-app alerts at saved thresholds." checked={draft.lowStockAlerts} onChange={(value) => update("lowStockAlerts", value)} /><SettingToggle label="Household updates" detail="Show invitations, assignments, and shared-inventory changes." checked={draft.householdAlerts} onChange={(value) => update("householdAlerts", value)} /><SettingToggle label="Recipe and product updates" detail="Optional PantryLens news and recipe suggestions." checked={draft.productUpdates} onChange={(value) => update("productUpdates", value)} /><SettingToggle label="Email delivery" detail="Requires a verified email provider and background scheduler." checked={draft.emailAlerts} onChange={(value) => update("emailAlerts", value)} backend /><SettingToggle label="Push delivery" detail="Requires browser permission, service workers, and a push provider." checked={draft.pushAlerts} onChange={(value) => update("pushAlerts", value)} backend /><Select label="Expiration alert timing" value={draft.alertDays} onChange={(event) => update("alertDays", event.target.value)}><option value="3">3 days before</option><option value="5">5 days before</option><option value="7">7 days before</option></Select></SettingsSection>}
@@ -797,6 +1142,37 @@ export default function App() {
   const [entered, setEntered] = useState(false);
   const [role, setRole] = useState<Role>("guest");
   const [auth, setAuth] = useState<"login" | "signup" | null>(null);
+  const [currentUser, setCurrentUser] = useState<{
+  id: string;
+  email?: string;
+  user_metadata?: { full_name?: string };
+} | null>(null);
+
+useEffect(() => {
+  let active = true;
+
+  supabase.auth.getSession().then(({ data, error }) => {
+    if (error) {
+      console.error("Unable to load Supabase session:", error.message);
+      return;
+    }
+
+    if (active) {
+      setCurrentUser(data.session?.user ?? null);
+    }
+  });
+
+  const {
+    data: { subscription },
+  } = supabase.auth.onAuthStateChange((_event, session) => {
+    setCurrentUser(session?.user ?? null);
+  });
+
+  return () => {
+    active = false;
+    subscription.unsubscribe();
+  };
+}, []);
   useEffect(() => {
     try {
       const stored = window.localStorage.getItem(`pantrylens-settings-${role}`);
@@ -816,5 +1192,11 @@ export default function App() {
   const enterGuest = () => { setRole("guest"); setEntered(true); };
   const authSuccess = () => { setAuth(null); setRole("owner"); setEntered(true); };
   if (!entered) return <><Landing onEnter={enterGuest} onAuth={setAuth} />{auth && <AuthModal mode={auth} onClose={() => setAuth(null)} onSuccess={authSuccess} />}</>;
-  return <AppShell role={role} onRoleChange={(next) => { setRole(next); }} onExit={() => setEntered(false)} />;
-}
+  return (
+  <AppShell
+    role={role}
+    user={currentUser}
+    onRoleChange={(next) => setRole(next)}
+    onExit={() => setEntered(false)}
+  />
+);}

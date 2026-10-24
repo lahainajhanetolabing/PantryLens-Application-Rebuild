@@ -1,0 +1,26 @@
+ .figma/make/analyze-routes |   4 [32m+[m
+ .figma/make/deploy         |   4 [32m+[m
+ .figma/make/deploy-preview |   5 [32m+[m
+ .figma/make/dev            |   4 [32m+[m
+ .figma/make/dev.json       |  22 [32m++[m
+ .figma/make/format         |   4 [32m+[m
+ .figma/make/install        |   4 [32m+[m
+ .figma/make/langserver     |   3 [32m+[m
+ .figma/make/site.json      |  10 [32m+[m
+ .gitattributes             | 146 [32m+++++++[m
+ .gitignore                 |  21 [32m+[m
+ .mise.toml                 |   3 [32m+[m
+ AGENTS.md                  |  41 [32m++[m
+ CLAUDE.md                  |   1 [32m+[m
+ desktop.ini                |   2 [32m+[m
+ index.html                 |  16 [32m+[m
+ package.json               |  28 [32m++[m
+ pnpm-lock.yaml             | 944 [32m+++++++++++++++++++++++++++++++++++++++++++++[m
+ public/favicon.svg         |   4 [32m+[m
+ src/App.tsx                | 820 [32m+++++++++++++++++++++++++++++++++++++++[m
+ src/index.css              | 944 [32m+++++++++++++++++++++++++++++++++++++++++++++[m
+ src/main.tsx               |  10 [32m+[m
+ src/vite-env.d.ts          |   1 [32m+[m
+ tsconfig.json              |  23 [32m++[m
+ vite.config.ts             | 389 [32m+++++++++++++++++++[m
+ 25 files changed, 3453 insertions(+)
