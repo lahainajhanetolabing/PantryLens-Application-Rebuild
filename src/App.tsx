@@ -69,7 +69,7 @@ type View =
   | "settings"
   | "admin";
 type Item = {
-  id: number;
+  id: number | string;
   name: string;
   category: string;
   quantity: number;
@@ -78,7 +78,25 @@ type Item = {
   expiry: string;
   status: "Available" | "Low stock" | "Expiring soon" | "Expired";
   icon: string;
+  minimum?: number;
 };
+
+type PantryRow = {
+  id: string; name: string; category: string; quantity: number; unit: string;
+  storage: string; expiry: string | null; minimum: number;
+};
+
+function displayPantryItem(row: PantryRow): Item {
+  const days = row.expiry ? Math.ceil((new Date(`${row.expiry}T00:00:00`).getTime() - new Date().setHours(0, 0, 0, 0)) / 86400000) : null;
+  const status: Item["status"] = days !== null && days < 0 ? "Expired" :
+    days !== null && days <= 3 ? "Expiring soon" :
+    row.quantity <= row.minimum ? "Low stock" : "Available";
+  return {
+    id: row.id, name: row.name, category: row.category, quantity: row.quantity,
+    unit: row.unit, location: row.storage, expiry: row.expiry ?? "Not set", minimum: row.minimum,
+    status, icon: row.name.trim().slice(0, 2).toUpperCase() || "FD",
+  };
+}
 
 const HERO_IMAGE =
   "https://images.unsplash.com/photo-1536489885071-87983c3e2859?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=85&w=1400";
@@ -518,6 +536,85 @@ function AppShell({ role, user, onRoleChange, onExit }: { role: Role; user: { id
   const [view, setView] = useState<View>(role === "admin" ? "admin" : "dashboard");
   const [items, setItems] = useState<Item[]>(role === "guest" ? initialItems : []);
   const [workspace, setWorkspace] = useState<Workspace>("personal");
+  const [personalHouseholdId, setPersonalHouseholdId] = useState<string | null>(null);
+  const [pantryLoading, setPantryLoading] = useState(role !== "guest");
+  const [pantryError, setPantryError] = useState("");
+
+  const loadPantry = async (householdId: string) => {
+    const { data, error } = await supabase.from("pantry_items")
+      .select("id,name,category,quantity,unit,storage,expiry,minimum")
+      .eq("household_id", householdId).order("created_at", { ascending: false });
+    if (error) throw error;
+    setItems(((data ?? []) as PantryRow[]).map(displayPantryItem));
+  };
+
+  useEffect(() => {
+    if (!user || role === "guest") {
+      setPersonalHouseholdId(null);
+      setPantryLoading(false);
+      return;
+    }
+    let active = true;
+    setPantryLoading(true);
+    setPantryError("");
+    const initialize = async () => {
+      try {
+        const existing = await supabase.from("households").select("id")
+          .eq("created_by", user.id).eq("kind", "personal").maybeSingle();
+        if (existing.error) throw existing.error;
+        let householdId: string | undefined = existing.data?.id;
+        if (!householdId) {
+          const created = await supabase.from("households")
+            .insert({ name: "My Personal Pantry", kind: "personal", created_by: user.id })
+            .select("id").single();
+          if (created.error) {
+            // A second session may have created the pantry concurrently.
+            if (created.error.code !== "23505") throw created.error;
+            const retry = await supabase.from("households").select("id")
+              .eq("created_by", user.id).eq("kind", "personal").single();
+            if (retry.error) throw retry.error;
+            householdId = retry.data.id;
+          } else householdId = created.data.id;
+        }
+        if (!active || !householdId) return;
+        setPersonalHouseholdId(householdId);
+        await loadPantry(householdId);
+      } catch (error) {
+        if (active) setPantryError(error instanceof Error ? error.message : "Could not load your pantry.");
+      } finally {
+        if (active) setPantryLoading(false);
+      }
+    };
+    void initialize();
+    return () => { active = false; };
+  }, [user?.id, role]);
+
+  const addPantryItem = async (input: { name: string; category: string; quantity: number; unit: string; storage: string; expiry: string | null; minimum: number }) => {
+    if (!user || !personalHouseholdId) throw new Error("Personal pantry is not ready. Please try again.");
+    const { error } = await supabase.from("pantry_items")
+      .insert({ ...input, household_id: personalHouseholdId, created_by: user.id });
+    if (error) throw error;
+    await loadPantry(personalHouseholdId);
+  };
+
+  const updatePantryItem = async (item: Item, input: { name: string; category: string; quantity: number; unit: string; storage: string; expiry: string | null; minimum: number }) => {
+    if (!user || !personalHouseholdId || typeof item.id !== "string") throw new Error("This item cannot be edited here.");
+    const { data, error } = await supabase.from("pantry_items")
+      .update(input).eq("id", item.id).eq("household_id", personalHouseholdId).select("id");
+    if (error) throw error;
+    if (!data?.length) throw new Error("Update was not permitted or the item no longer exists.");
+    await loadPantry(personalHouseholdId);
+  };
+
+  const deletePantryItem = async (item: Item) => {
+    if (!user || !personalHouseholdId || typeof item.id !== "string") throw new Error("This item cannot be deleted here.");
+    const { data, error } = await supabase.from("pantry_items").delete()
+      .eq("id", item.id).eq("household_id", personalHouseholdId).select("id");
+    if (error) throw error;
+    if (!data?.length) throw new Error("Delete was not permitted or the item no longer exists.");
+    await loadPantry(personalHouseholdId);
+  };
+
   const [mobileOpen, setMobileOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
@@ -563,9 +660,9 @@ function AppShell({ role, user, onRoleChange, onExit }: { role: Role; user: { id
   const notify = (text: string) => { setToast(text); window.setTimeout(() => setToast(""), 2600); };
   const page = () => {
     if (view === "dashboard") return <Dashboard navigate={navigate} role={role} items={items} user={user} />;
-    if (view === "inventory" || view === "shared") return <Inventory items={items} setItems={setItems} role={role} gated={gated} notify={notify} shared={view === "shared"} navigate={navigate} />;
+    if (view === "inventory" || view === "shared") return <Inventory items={view === "shared" ? [] : items} role={role} gated={gated} notify={notify} shared={view === "shared"} navigate={navigate} onDelete={deletePantryItem} onUpdate={updatePantryItem} />;
     if (view === "scan") return <ScanPage role={role} gated={gated} notify={notify} navigate={navigate} />;
-    if (view === "add") return <AddItem role={role} gated={gated} notify={notify} navigate={navigate} />;
+    if (view === "add") return <AddItem role={role} gated={gated} notify={notify} navigate={navigate} onAdd={addPantryItem} />;
     if (view === "monitoring") return <Monitoring items={items} navigate={navigate} role={role} gated={gated} notify={notify} />;
     if (view === "usage") return <UsageHistory role={role} gated={gated} notify={notify} />;
     if (view === "recipes") return <Recipes navigate={navigate} role={role} gated={gated} notify={notify} />;
@@ -583,6 +680,7 @@ function AppShell({ role, user, onRoleChange, onExit }: { role: Role; user: { id
     ? [{ view: "admin" as View, label: "Admin console", icon: ShieldCheck }, { view: "settings" as View, label: "Admin settings", icon: Settings }]
     : role === "member" ? memberNavItems : navItems;
   return <div className="app-shell">
+    {(pantryLoading || pantryError) && <div role="status" style={{ position: "fixed", top: 8, right: 8, zIndex: 1000, padding: 12, background: "var(--surface, white)", border: "1px solid currentColor" }}>{pantryLoading ? "Loading your personal pantry…" : `Pantry sync error: ${pantryError}`}</div>}
     <aside id="primary-navigation" className={`sidebar ${mobileOpen ? "sidebar-open" : ""}`}>
       <div className="sidebar-top"><Logo inverse /><button className="sidebar-close" onClick={() => setMobileOpen(false)} aria-label="Close navigation"><X /></button></div>
       {role === "guest" && <div className="demo-pill"><Eye size={15} /><span><b>Guest preview</b><small>Read-only demo data</small></span></div>}
@@ -739,7 +837,7 @@ function Dashboard({ navigate, role, items, user }: { navigate: (view: View) => 
   </>;
 }
 
-function Inventory({ items, setItems, role, gated, notify, shared, navigate }: { items: Item[]; setItems: React.Dispatch<React.SetStateAction<Item[]>>; role: Role; gated: (fn: () => void) => void; notify: (text: string) => void; shared: boolean; navigate: (view: View) => void }) {
+function Inventory({ items, role, gated, notify, shared, navigate, onDelete, onUpdate }: { items: Item[]; role: Role; gated: (fn: () => void) => void; notify: (text: string) => void; shared: boolean; navigate: (view: View) => void; onDelete: (item: Item) => Promise<void>; onUpdate: (item: Item, input: { name: string; category: string; quantity: number; unit: string; storage: string; expiry: string | null; minimum: number }) => Promise<void> }) {
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("All categories");
   const [status, setStatus] = useState("All statuses");
@@ -750,19 +848,83 @@ function Inventory({ items, setItems, role, gated, notify, shared, navigate }: {
   const [grid, setGrid] = useState(true);
   const [selected, setSelected] = useState<Item | null>(null);
   const [deleteItem, setDeleteItem] = useState<Item | null>(null);
-  const assignedItemIds = [1, 2, 6];
+  const [editItem, setEditItem] = useState<Item | null>(null);
+  const [editSaving, setEditSaving] = useState(false);
+  const saveEdit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (!editItem || editSaving || role === "guest" || shared || role === "member") return;
+    const form = new FormData(event.currentTarget);
+    const input = {
+      name: String(form.get("name") ?? "").trim(),
+      category: String(form.get("category") ?? ""),
+      quantity: Number(form.get("quantity")),
+      unit: String(form.get("unit") ?? ""),
+      storage: String(form.get("storage") ?? ""),
+      expiry: String(form.get("expiry") ?? "") || null,
+      minimum: Number(form.get("minimum")),
+    };
+    if (!input.name || !categories.includes(input.category) || !Number.isFinite(input.quantity) || input.quantity <= 0 ||
+        !Number.isFinite(input.minimum) || input.minimum < 0 || !input.unit || !input.storage) {
+      notify("Check the item name, category, quantity and minimum stock.");
+      return;
+    }
+    setEditSaving(true);
+    try {
+      await onUpdate(editItem, input);
+      notify(`${input.name} updated successfully`);
+      setEditItem(null);
+      setSelected(null);
+    } catch (error) {
+      notify(error instanceof Error ? error.message : "Could not update item");
+    } finally {
+      setEditSaving(false);
+    }
+  };
+  const openEdit = (item: Item) => {
+    if (role === "guest") { gated(() => {}); return; }
+    if (shared || role === "member") { notify("Shared pantry editing is not connected yet."); return; }
+    setSelected(null);
+    setEditItem(item);
+  };
+
+  const assignedItemIds: Array<number | string> = [1, 2, 6];
   const canEditItem = (item: Item) => role !== "member" || assignedItemIds.includes(item.id);
-  const filtered = items.filter((i) => i.name.toLowerCase().includes(query.toLowerCase()) && (category === "All categories" || i.category === category) && (status === "All statuses" || i.status === status)).sort((a, b) => sort === "Name" || sort === "Name A–Z" ? a.name.localeCompare(b.name) : sort === "Quantity" ? b.quantity - a.quantity : sort === "Expiration date" ? a.expiry.localeCompare(b.expiry) : b.id - a.id);
-  const remove = () => { if (!deleteItem) return; setItems((all) => all.filter((i) => i.id !== deleteItem.id)); notify(`${deleteItem.name} deleted from demo inventory`); setDeleteItem(null); };
+  const filtered = items.filter((i) => i.name.toLowerCase().includes(query.toLowerCase()) && (category === "All categories" || i.category === category) && (status === "All statuses" || i.status === status)).sort((a, b) => sort === "Name" || sort === "Name A–Z" ? a.name.localeCompare(b.name) : sort === "Quantity" ? b.quantity - a.quantity : sort === "Expiration date" ? a.expiry.localeCompare(b.expiry) : String(b.id).localeCompare(String(a.id)));
+  const remove = async () => { if (!deleteItem || shared || role === "guest") return; try { await onDelete(deleteItem); notify(`${deleteItem.name} deleted from your pantry`); setDeleteItem(null); } catch (error) { notify(error instanceof Error ? error.message : "Could not delete item"); } };
   return <>
-    <PageHeader eyebrow={shared ? "Dela Cruz Home" : "Inventory"} title={shared ? "Shared inventory" : "Your pantry"} description={shared ? role === "member" ? "Shared household items and the records assigned to you." : "Review the inventory shared with household members." : `${items.length} items in your pantry.`} actions={role !== "member" ? <><Button variant="secondary" onClick={() => navigate("scan")} icon={<ScanLine size={17} />}>Scan food</Button><Button onClick={() => gated(() => navigate("add"))} icon={<Plus size={17} />}>Add item</Button></> : <Button onClick={() => navigate("usage")} icon={<TrendingDown size={17} />}>Record usage</Button>} />
+    <PageHeader eyebrow={shared ? "Household" : "Inventory"} title={shared ? "Shared inventory" : "Your pantry"} description={shared ? role === "member" ? "Shared household items and the records assigned to you." : "Review the inventory shared with household members." : `${items.length} items in your pantry.`} actions={role !== "member" ? <><Button variant="secondary" onClick={() => navigate("scan")} icon={<ScanLine size={17} />}>Scan food</Button><Button onClick={() => gated(() => navigate("add"))} icon={<Plus size={17} />}>Add item</Button></> : <Button onClick={() => navigate("usage")} icon={<TrendingDown size={17} />}>Record usage</Button>} />
     {shared && <Card className="info-banner"><Users size={20} /><div><b>{role === "member" ? "Member permissions" : "Shared household preview"}</b><p>{role === "member" ? "You can view shared items, record usage, and edit only the records marked Assigned to you. Delete and ownership controls are hidden." : "Household members see only shared records. Assigned-record and usage permissions must also be enforced by backend policies."}</p></div></Card>}
     <Card className="inventory-toolbar"><Input aria-label="Search inventory" placeholder="Search food items…" value={query} onChange={(e) => setQuery(e.target.value)} icon={<Search size={18} />} /><Select value={category} onChange={(e) => setCategory(e.target.value)}>{["All categories", ...categories].map((option) => <option key={option}>{option}</option>)}</Select><Select value={status} onChange={(e) => setStatus(e.target.value)}>{["All statuses", "Available", "Low stock", "Expiring soon", "Expired"].map((option) => <option key={option}>{option}</option>)}</Select><Select aria-label="Sort inventory" value={sort} onChange={(event) => setSort(event.target.value)}><option>Recently added</option><option>Name A–Z</option><option>Expiration date</option><option>Quantity</option></Select><div className="view-toggle"><button className={grid ? "active" : ""} onClick={() => setGrid(true)} aria-label="Grid view"><LayoutDashboard size={17} /></button><button className={!grid ? "active" : ""} onClick={() => setGrid(false)} aria-label="Table view"><List size={17} /></button></div></Card>
     <div className="result-count"><span>{filtered.length} items</span><span>{role === "guest" ? "Sample preview inventory" : "Your account inventory"}</span></div>
     {filtered.length === 0 ? <Card className="empty-state"><Package /><h2>{items.length === 0 ? "Your pantry is empty" : "No pantry items found"}</h2><p>{items.length === 0 ? "You have not added any food yet. Add your first item or scan a photo to get started." : "Try changing your search or filters."}</p>{items.length === 0 ? <Button onClick={() => navigate("add")} icon={<Plus size={17} />}>Add your first item</Button> : <Button variant="secondary" onClick={() => { setQuery(""); setCategory("All categories"); setStatus("All statuses"); }}>Clear filters</Button>}</Card> :
-    grid ? <div className="inventory-grid">{filtered.map((item) => <article className="inventory-card" key={item.id}><div className="inventory-image"><span>{item.icon}</span><StatusBadge status={item.status} />{role === "member" && assignedItemIds.includes(item.id) ? <span className="assigned-badge"><Badge tone="info">Assigned</Badge></span> : <button aria-label={`View actions for ${item.name}`} onClick={() => setSelected(item)}><MoreHorizontal size={18} /></button>}</div><div><span className="category-label">{item.category}</span><h3>{item.name}</h3><strong>{item.quantity} <small>{item.unit}</small></strong><div className="item-meta"><span><Warehouse size={14} />{item.location}</span><span><Clock3 size={14} />Expires {item.expiry}</span></div><div className="item-actions"><Button variant="secondary" onClick={() => setSelected(item)}>View details</Button>{canEditItem(item) && <button aria-label={`Edit ${item.name}`} onClick={() => gated(() => notify("Edit form opened in demo mode"))}><Pencil size={17} /></button>}{role !== "member" && <button aria-label={`Delete ${item.name}`} onClick={() => gated(() => setDeleteItem(item))}><Trash2 size={17} /></button>}</div></div></article>)}</div> :
+    grid ? <div className="inventory-grid">{filtered.map((item) => <article className="inventory-card" key={item.id}><div className="inventory-image"><span>{item.icon}</span><StatusBadge status={item.status} />{role === "member" && assignedItemIds.includes(item.id) ? <span className="assigned-badge"><Badge tone="info">Assigned</Badge></span> : <button aria-label={`View actions for ${item.name}`} onClick={() => setSelected(item)}><MoreHorizontal size={18} /></button>}</div><div><span className="category-label">{item.category}</span><h3>{item.name}</h3><strong>{item.quantity} <small>{item.unit}</small></strong><div className="item-meta"><span><Warehouse size={14} />{item.location}</span><span><Clock3 size={14} />Expires {item.expiry}</span></div><div className="item-actions"><Button variant="secondary" onClick={() => setSelected(item)}>View details</Button>{canEditItem(item) && <button aria-label={`Edit ${item.name}`} onClick={() => openEdit(item)}><Pencil size={17} /></button>}{role !== "member" && role !== "guest" && !shared && <button aria-label={`Delete ${item.name}`} onClick={() => gated(() => setDeleteItem(item))}><Trash2 size={17} /></button>}</div></div></article>)}</div> :
     <Card className="table-card"><div className="data-table"><div className="table-head"><span>Item</span><span>Quantity</span><span>Location</span><span>Expiration</span><span>Status</span><span /></div>{filtered.map((item) => <div className="table-row" key={item.id}><span className="table-item"><i>{item.icon}</i><span><b>{item.name}</b><small>{item.category}</small></span></span><span>{item.quantity} {item.unit}</span><span>{item.location}</span><span>{item.expiry}</span><span><StatusBadge status={item.status} /></span><button onClick={() => setSelected(item)} aria-label={`View ${item.name}`}><ChevronRight size={18} /></button></div>)}</div></Card>}
-    {selected && <Modal title={selected.name} onClose={() => setSelected(null)}><div className="detail-hero"><span>{selected.icon}</span><div><Badge>{selected.category}</Badge><h3>{selected.quantity} {selected.unit} available</h3><StatusBadge status={selected.status} /></div></div>{role === "member" && <div className="permission-note"><ShieldCheck size={17} /><span>{canEditItem(selected) ? "This record is assigned to you. You may record usage and update permitted fields." : "View-only shared record. You may record usage but cannot edit item details."}</span></div>}<div className="detail-grid"><div><small>Storage</small><b>{selected.location}</b></div><div><small>Expiration</small><b>{selected.expiry}</b></div><div><small>Minimum stock</small><b>2 {selected.unit}</b></div><div><small>Last updated</small><b>Today, 8:40 AM</b></div></div><h3 className="subheading">Recent history</h3><div className="mini-timeline"><span /><div><b>Quantity updated</b><small>3 → {selected.quantity} {selected.unit} · Maria</small></div></div><div className="modal-actions"><Button variant="secondary" onClick={() => gated(() => navigate("usage"))}>Record usage</Button>{canEditItem(selected) && <Button onClick={() => gated(() => notify("Item changes saved in demo"))}>Edit item</Button>}</div></Modal>}
+    {selected && <Modal title={selected.name} onClose={() => setSelected(null)}><div className="detail-hero"><span>{selected.icon}</span><div><Badge>{selected.category}</Badge><h3>{selected.quantity} {selected.unit} available</h3><StatusBadge status={selected.status} /></div></div>{role === "member" && <div className="permission-note"><ShieldCheck size={17} /><span>{canEditItem(selected) ? "This record is assigned to you. You may record usage and update permitted fields." : "View-only shared record. You may record usage but cannot edit item details."}</span></div>}<div className="detail-grid"><div><small>Storage</small><b>{selected.location}</b></div><div><small>Expiration</small><b>{selected.expiry}</b></div><div><small>Minimum stock</small><b>2 {selected.unit}</b></div><div><small>Last updated</small><b>Today, 8:40 AM</b></div></div><h3 className="subheading">Recent history</h3><div className="mini-timeline"><span /><div><b>Quantity updated</b><small>3 → {selected.quantity} {selected.unit} · Maria</small></div></div><div className="modal-actions"><Button variant="secondary" onClick={() => gated(() => navigate("usage"))}>Record usage</Button>{canEditItem(selected) && <Button onClick={() => openEdit(selected)}>Edit item</Button>}</div></Modal>}
+    {editItem && <Modal title={`Edit ${editItem.name}`} onClose={() => { if (!editSaving) setEditItem(null); }}>
+      <form onSubmit={saveEdit}>
+        <div className="form-card">
+          <Input label="Food name *" name="name" defaultValue={editItem.name} required />
+          <Select label="Category *" name="category" defaultValue={editItem.category} required>
+            {categories.map((c) => <option key={c} value={c}>{c}</option>)}
+          </Select>
+          <div className="split-fields">
+            <Input label="Quantity *" name="quantity" type="number" min="0.01" step="0.01" defaultValue={editItem.quantity} required />
+            <Select label="Unit *" name="unit" defaultValue={editItem.unit} required>
+              {[...new Set(["pieces", "kilograms", "grams", "liters", "milliliters", "cans", "packs", "bunches", editItem.unit])].map((unit) => <option key={unit} value={unit}>{unit}</option>)}
+            </Select>
+          </div>
+          <Select label="Storage location *" name="storage" defaultValue={editItem.location} required>
+            {[...new Set([...locations, editItem.location])].map((location) => <option key={location} value={location}>{location}</option>)}
+          </Select>
+          <Input label="Expiration date" name="expiry" type="date" defaultValue={/^\\d{4}-\\d{2}-\\d{2}$/.test(editItem.expiry) ? editItem.expiry : ""} />
+          <Input label="Minimum-stock threshold" name="minimum" type="number" min="0" step="0.01" defaultValue={editItem.minimum ?? 0} required />
+        </div>
+        <div className="modal-actions">
+          <Button variant="secondary" onClick={() => setEditItem(null)} disabled={editSaving}>Cancel</Button>
+          <Button type="submit" disabled={editSaving}>{editSaving ? "Saving…" : "Save changes"}</Button>
+        </div>
+      </form>
+    </Modal>}
     {deleteItem && <Modal title={`Delete ${deleteItem.name}?`} onClose={() => setDeleteItem(null)}><div className="warning-box"><AlertTriangle /><p>This removes the item from available inventory. Its audit history remains available in production.</p></div><div className="modal-actions"><Button variant="secondary" onClick={() => setDeleteItem(null)}>Cancel</Button><Button variant="danger" onClick={remove}>Delete item</Button></div></Modal>}
   </>;
 }
@@ -792,16 +954,37 @@ function DetectedItem({ name, confidence, icon }: { name: string; confidence: nu
   return <div className="detected-item"><button className="detected-head" onClick={() => setOpen(!open)}><span>{icon}</span><span><b>{name}</b><small>{confidence}% confidence</small></span><Badge tone="success">High confidence</Badge><ChevronDown className={open ? "rotate" : ""} size={18} /></button>{open && <div className="detected-form"><Input label="Food name" defaultValue={name} /><Select label="Category" defaultValue="Vegetables">{categories.map((c) => <option key={c}>{c}</option>)}</Select><div className="split-fields"><Input label="Quantity" type="number" defaultValue="2" min="0" /><Select label="Unit" defaultValue={defaults.units === "Metric" ? "kilograms" : "pieces"}><option>pieces</option><option>kilograms</option><option>grams</option><option>liters</option><option>milliliters</option><option>cans</option><option>packs</option><option>bunches</option></Select></div><Select label="Storage location"><option>Refrigerator</option>{locations.map((l) => <option key={l}>{l}</option>)}</Select><Input label="Expiration date (from packaging, if known)" type="date" /><p className="field-help">A food photo cannot reliably reveal its actual expiration date.</p></div>}</div>;
 }
 
-function AddItem({ role, gated, notify, navigate }: { role: Role; gated: (fn: () => void) => void; notify: (text: string) => void; navigate: (v: View) => void }) {
+function AddItem({ role, gated, notify, navigate, onAdd }: { role: Role; gated: (fn: () => void) => void; notify: (text: string) => void; navigate: (v: View) => void; onAdd: (input: { name: string; category: string; quantity: number; unit: string; storage: string; expiry: string | null; minimum: number }) => Promise<void> }) {
   const [name, setName] = useState("");
   const [defaults] = useState(() => {
     try { return { ...defaultSettings(role), ...JSON.parse(window.localStorage.getItem(`pantrylens-settings-${role}`) || "{}") } as SettingsData; }
     catch { return defaultSettings(role); }
   });
-  const submit = (event: React.FormEvent) => { event.preventDefault(); gated(() => { notify(`${name || "Food item"} added to demo inventory`); navigate("inventory"); }); };
+  const [saving, setSaving] = useState(false);
+  const submit = async (event: React.FormEvent<HTMLFormElement>) => {
+    event.preventDefault();
+    if (role === "guest" || saving) { gated(() => {}); return; }
+    const form = new FormData(event.currentTarget);
+    const category = String(form.get("category") ?? "");
+    if (!categories.includes(category)) { notify("Choose Meat or Vegetables."); return; }
+    const quantity = Number(form.get("quantity"));
+    const minimum = Number(form.get("minimum"));
+    if (!name.trim() || !Number.isFinite(quantity) || quantity <= 0 || !Number.isFinite(minimum) || minimum < 0) {
+      notify("Check the food name, quantity, and minimum stock."); return;
+    }
+    setSaving(true);
+    try {
+      await onAdd({ name: name.trim(), category, quantity, minimum,
+        unit: String(form.get("unit")), storage: String(form.get("storage")),
+        expiry: String(form.get("expiry") || "") || null });
+      notify(`${name.trim()} saved to your personal pantry`);
+      navigate("inventory");
+    } catch (error) { notify(error instanceof Error ? error.message : "Could not save item"); }
+    finally { setSaving(false); }
+  };
   return <>
     <PageHeader eyebrow="Inventory" title="Add food manually" description="Record an item with the details you know. You can update them anytime." />
-    <form className="form-layout" onSubmit={submit}><Card className="form-card"><h2>Item information</h2><p>Fields marked required keep inventory quantities accurate.</p><Input label="Food name *" placeholder="e.g. Chicken, Pork, Eggplant, or Pechay" value={name} onChange={(e) => setName(e.target.value)} required /><Select label="Food category *" required><option value="">Select category</option>{categories.map((c) => <option key={c}>{c}</option>)}</Select><div className="split-fields"><Input label="Quantity *" type="number" min="0.01" step="0.01" required /><Select label="Unit *" defaultValue={defaults.units === "Metric" ? "kilograms" : "pieces"}><option>pieces</option><option>kilograms</option><option>grams</option><option>liters</option><option>milliliters</option><option>cans</option><option>packs</option><option>bunches</option></Select></div><Select label="Storage location *" defaultValue={defaults.storage}>{locations.map((l) => <option key={l}>{l}</option>)}</Select><div className="split-fields"><Input label="Purchase date" type="date" /><Input label="Expiration date" type="date" /></div><Input label="Minimum-stock threshold" type="number" min="0" defaultValue={defaults.lowStockDefault} /><label className="field"><span>Notes</span><textarea placeholder="Brand, packaging, or household notes" rows={4} /></label></Card><aside><Card className="image-upload-small"><ImagePlus /><h3>Add an item photo</h3><p>Optional. Images will use Supabase Storage after backend integration.</p><Button variant="secondary" onClick={() => notify("Image picker opened in demo mode")}>Choose image</Button></Card>{name.toLowerCase().includes("egg") && <Card className="duplicate-warning"><AlertTriangle /><div><b>Possible duplicate</b><p>Eggs already exists with 8 pcs in the refrigerator.</p><button type="button" onClick={() => navigate("inventory")}>Review existing item</button></div></Card>}<div className="sticky-actions"><Button variant="secondary" onClick={() => navigate("inventory")}>Cancel</Button><Button type="submit">Add to pantry</Button></div></aside></form>
+    <form className="form-layout" onSubmit={submit}><Card className="form-card"><h2>Item information</h2><p>Fields marked required keep inventory quantities accurate.</p><Input label="Food name *" placeholder="e.g. Chicken, Pork, Eggplant, or Pechay" value={name} onChange={(e) => setName(e.target.value)} required /><Select label="Food category *" name="category" required><option value="">Select category</option>{categories.map((c) => <option key={c}>{c}</option>)}</Select><div className="split-fields"><Input label="Quantity *" name="quantity" type="number" min="0.01" step="0.01" required /><Select label="Unit *" name="unit" defaultValue={defaults.units === "Metric" ? "kilograms" : "pieces"}><option>pieces</option><option>kilograms</option><option>grams</option><option>liters</option><option>milliliters</option><option>cans</option><option>packs</option><option>bunches</option></Select></div><Select label="Storage location *" name="storage" defaultValue={defaults.storage}>{locations.map((l) => <option key={l}>{l}</option>)}</Select><div className="split-fields"><Input label="Purchase date" type="date" /><Input label="Expiration date" name="expiry" type="date" /></div><Input label="Minimum-stock threshold" name="minimum" type="number" min="0" defaultValue={defaults.lowStockDefault} /><label className="field"><span>Notes</span><textarea placeholder="Brand, packaging, or household notes" rows={4} /></label></Card><aside><Card className="image-upload-small"><ImagePlus /><h3>Add an item photo</h3><p>Optional. Images will use Supabase Storage after backend integration.</p><Button variant="secondary" onClick={() => notify("Image picker opened in demo mode")}>Choose image</Button></Card><div className="sticky-actions"><Button variant="secondary" onClick={() => navigate("inventory")}>Cancel</Button><Button type="submit" disabled={saving}>{saving ? "Saving…" : "Add to pantry"}</Button></div></aside></form>
   </>;
 }
 

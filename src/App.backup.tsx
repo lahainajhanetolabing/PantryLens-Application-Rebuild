@@ -645,27 +645,164 @@ function PageHeader({ eyebrow, title, description, actions }: { eyebrow?: string
   return <div className="page-header"><div>{eyebrow && <span className="eyebrow">{eyebrow}</span>}<h1>{title}</h1><p>{description}</p></div>{actions && <div className="page-actions">{actions}</div>}</div>;
 }
 
-function Dashboard({ navigate, role, items }: { navigate: (view: View) => void; role: Role; items: Item[] }) {
+function Dashboard({
+  navigate,
+  role,
+  items,
+}: {
+  navigate: (view: View) => void;
+  role: Role;
+  items: Item[];
+}) {
   const statCards = [
-    { label: role === "member" ? "Shared items" : "Pantry items", value: items.length, meta: role === "member" ? "Authorized household records" : "Across 4 locations", icon: Package, tone: "green", view: (role === "member" ? "shared" : "inventory") as View },
-    { label: "Expiring soon", value: items.filter((i) => i.status === "Expiring soon").length, meta: "Within 5 days", icon: Clock3, tone: "amber", view: "monitoring" as View },
-    { label: "Low stock", value: items.filter((i) => i.status === "Low stock").length, meta: "Needs attention", icon: TrendingDown, tone: "orange", view: "monitoring" as View },
-    { label: "Recipe matches", value: "12", meta: "Best match 92%", icon: Utensils, tone: "sage", view: "recipes" as View },
+    {
+      label: role === "member" ? "Shared items" : "Pantry items",
+      value: items.length,
+      meta: "Current inventory",
+      icon: Package,
+      tone: "green",
+      view: (role === "member" ? "shared" : "inventory") as View,
+    },
+    {
+      label: "Expiring soon",
+      value: items.filter((i) => i.status === "Expiring soon").length,
+      meta: "Within 5 days",
+      icon: Clock3,
+      tone: "amber",
+      view: "monitoring" as View,
+    },
+    {
+      label: "Low stock",
+      value: items.filter((i) => i.status === "Low stock").length,
+      meta: "Needs attention",
+      icon: TrendingDown,
+      tone: "orange",
+      view: "monitoring" as View,
+    },
   ];
-  return <>
-    <PageHeader eyebrow={role === "guest" ? "Preview workspace" : role === "member" ? "Dela Cruz Home · Member access" : "Tuesday, September 8"} title={`Magandang umaga, ${role === "member" ? "Maria" : "Juan"}!`} description={role === "member" ? "Here’s what needs attention in the inventory shared with you." : "Here’s what’s happening in your pantry today."} actions={<Button variant="secondary" onClick={() => navigate("monitoring")} icon={<SlidersHorizontal size={17} />}>View food status</Button>} />
-    <div className="stats-grid">{statCards.map(({ label, value, meta, icon: Icon, tone, view }) => <Card className="stat-card" key={label} onClick={() => navigate(view)}><div className={`stat-icon ${tone}`}><Icon size={21} /></div><span>{label}</span><strong>{value}</strong><small>{meta}</small><ChevronRight className="stat-arrow" size={18} /></Card>)}</div>
-    <div className="dashboard-grid">
-      <Card className="attention-card">
-        <div className="card-heading"><div><h2>Needs your attention</h2><p>Handle these items soon to reduce waste.</p></div><button onClick={() => navigate("monitoring")}>View all <ChevronRight size={16} /></button></div>
-        <div className="attention-list">{items.filter((i) => i.status !== "Available").slice(0, 4).map((item) => <button key={item.id} onClick={() => navigate(role === "member" ? "shared" : "inventory")}><span className="item-emoji">{item.icon}</span><span><b>{item.name}</b><small>{item.quantity} {item.unit} · {item.location}</small></span><StatusBadge status={item.status} /><ChevronRight size={17} /></button>)}</div>
-      </Card>
-      <Card className="quick-card"><div className="card-heading"><div><h2>Quick actions</h2><p>{role === "member" ? "Work with records shared with you." : "Keep your pantry up to date."}</p></div></div>{role === "member" ? <div className="quick-grid"><button onClick={() => navigate("shared")}><span><Warehouse /></span><b>Shared pantry</b><small>View authorized items</small></button><button onClick={() => navigate("usage")}><span><TrendingDown /></span><b>Record usage</b><small>Update shared quantities</small></button><button onClick={() => navigate("recipes")}><span><Utensils /></span><b>Find a recipe</b><small>Use shared ingredients</small></button><button onClick={() => navigate("monitoring")}><span><Clock3 /></span><b>Food alerts</b><small>Review relevant items</small></button></div> : <div className="quick-grid"><button onClick={() => navigate("scan")}><span><ScanLine /></span><b>Scan food</b><small>Use a photo</small></button><button onClick={() => navigate("add")}><span><Plus /></span><b>Add manually</b><small>Enter details</small></button><button onClick={() => navigate("recipes")}><span><Utensils /></span><b>Find a recipe</b><small>Cook what you have</small></button><button onClick={() => navigate("shopping")}><span><ShoppingBasket /></span><b>Shopping list</b><small>3 to pick up</small></button></div>}</Card>
-    </div>
-    <div className="section-heading"><div><h2>Made for your pantry</h2><p>Recipes ranked by your available ingredients.</p></div><button onClick={() => navigate("recipes")}>Browse all recipes <ChevronRight size={16} /></button></div>
-    <div className="dash-recipes">{recipes.slice(0, 3).map((recipe) => <article key={recipe.id} onClick={() => navigate("recipe")}><div className="recipe-img"><img src={recipe.image} alt={recipe.name} /><Badge tone="success">{recipe.match}% match</Badge><button aria-label="Save recipe" onClick={(event) => { event.stopPropagation(); navigate("recipe"); }}><Heart size={17} /></button></div><div><h3>{recipe.name}</h3><p>{recipe.description}</p><span>{recipe.time} · {recipe.level}</span></div></article>)}</div>
-    <Card className="activity-card"><div className="card-heading"><div><h2>Recent pantry activity</h2><p>Latest updates from your household.</p></div><button onClick={() => navigate("usage")}>View history <ChevronRight size={16} /></button></div><div className="activity-row"><span className="activity-icon consumed"><Minus /></span><div><b>Maria recorded 2 eggs used</b><small>Today, 8:40 AM · Breakfast</small></div><Badge>Usage</Badge></div><div className="activity-row"><span className="activity-icon added"><Plus /></span><div><b>You added chicken thighs</b><small>Yesterday, 6:12 PM · Freezer</small></div><Badge tone="success">Added</Badge></div></Card>
-  </>;
+
+  return (
+    <>
+      <PageHeader
+        eyebrow={new Date().toLocaleDateString("en-PH", {
+          weekday: "long",
+          year: "numeric",
+          month: "long",
+          day: "numeric",
+        })}
+        title="Your pantry at a glance"
+        description="Manage your food inventory and keep track of what needs attention."
+        actions={
+          <Button
+            variant="secondary"
+            onClick={() => navigate("monitoring")}
+            icon={<SlidersHorizontal size={17} />}
+          >
+            View food status
+          </Button>
+        }
+      />
+
+      <div className="stats-grid">
+        {statCards.map(
+          ({ label, value, meta, icon: Icon, tone, view }) => (
+            <Card
+              className="stat-card"
+              key={label}
+              onClick={() => navigate(view)}
+            >
+              <div className={`stat-icon ${tone}`}>
+                <Icon size={21} />
+              </div>
+              <span>{label}</span>
+              <strong>{value}</strong>
+              <small>{meta}</small>
+              <ChevronRight className="stat-arrow" size={18} />
+            </Card>
+          ),
+        )}
+      </div>
+
+      <div className="dashboard-grid">
+        <Card className="attention-card">
+          <div className="card-heading">
+            <div>
+              <h2>Needs your attention</h2>
+              <p>Items that may need attention soon.</p>
+            </div>
+            <button onClick={() => navigate("monitoring")}>
+              View all <ChevronRight size={16} />
+            </button>
+          </div>
+
+          <div className="attention-list">
+            {items.filter((i) => i.status !== "Available").length > 0 ? (
+              items
+                .filter((i) => i.status !== "Available")
+                .slice(0, 4)
+                .map((item) => (
+                  <button
+                    key={item.id}
+                    onClick={() =>
+                      navigate(role === "member" ? "shared" : "inventory")
+                    }
+                  >
+                    <span className="item-emoji">{item.icon}</span>
+                    <span>
+                      <b>{item.name}</b>
+                      <small>
+                        {item.quantity} {item.unit} · {item.location}
+                      </small>
+                    </span>
+                    <StatusBadge status={item.status} />
+                    <ChevronRight size={17} />
+                  </button>
+                ))
+            ) : (
+              <div className="empty-state">
+                <p>No items need attention right now.</p>
+              </div>
+            )}
+          </div>
+        </Card>
+
+        <Card className="quick-card">
+          <div className="card-heading">
+            <div>
+              <h2>Quick actions</h2>
+              <p>Manage your pantry.</p>
+            </div>
+          </div>
+
+          <div className="quick-grid">
+            <button onClick={() => navigate("scan")}>
+              <span><ScanLine /></span>
+              <b>Scan food</b>
+              <small>Select a food image</small>
+            </button>
+
+            <button onClick={() => navigate("add")}>
+              <span><Plus /></span>
+              <b>Add manually</b>
+              <small>Enter item details</small>
+            </button>
+
+            <button onClick={() => navigate("inventory")}>
+              <span><Package /></span>
+              <b>Inventory</b>
+              <small>View pantry items</small>
+            </button>
+
+            <button onClick={() => navigate("monitoring")}>
+              <span><Clock3 /></span>
+              <b>Food status</b>
+              <small>Review item conditions</small>
+            </button>
+          </div>
+        </Card>
+      </div>
+    </>
+  );
 }
 
 function Inventory({ items, setItems, role, gated, notify, shared, navigate }: { items: Item[]; setItems: React.Dispatch<React.SetStateAction<Item[]>>; role: Role; gated: (fn: () => void) => void; notify: (text: string) => void; shared: boolean; navigate: (view: View) => void }) {
