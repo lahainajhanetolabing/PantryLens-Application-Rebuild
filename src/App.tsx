@@ -514,7 +514,7 @@ function AuthModal({
 }
 
 
-function AppShell({ role, user, onRoleChange, onExit }: { role: Role; user: { id: string; email?: string; user_metadata?: { full_name?: string } } | null; onRoleChange: (role: Role) => void; onExit: () => void }) {
+function AppShell({ role, user, onRequestAuth, onExit }: { role: Role; user: { id: string; email?: string; user_metadata?: { full_name?: string } } | null; onRequestAuth: () => void; onExit: () => void }) {
   const [view, setView] = useState<View>(role === "admin" ? "admin" : "dashboard");
   const [items, setItems] = useState(initialItems);
   const [workspace, setWorkspace] = useState<Workspace>(role === "owner" ? "personal" : "household");
@@ -550,12 +550,6 @@ function AppShell({ role, user, onRoleChange, onExit }: { role: Role; user: { id
   };
   const gated = (action: () => void) => { if (role === "guest") setAuthGate(true); else action(); };
   const notify = (text: string) => { setToast(text); window.setTimeout(() => setToast(""), 2600); };
-  const switchRole = (nextRole: Role, nextView: View) => {
-    onRoleChange(nextRole);
-    setView(nextView);
-    setProfileOpen(false);
-    setContextOpen(false);
-  };
 
   const page = () => {
     if (view === "dashboard") return <Dashboard navigate={navigate} role={role} items={items} />;
@@ -627,7 +621,7 @@ function AppShell({ role, user, onRoleChange, onExit }: { role: Role; user: { id
       ? "Household member"
       : user?.email || "No email available"}
 </small></span><ChevronDown size={16} /></button>
-          {profileOpen && <div className="profile-popover"><button onClick={() => { navigate("settings"); setProfileOpen(false); }}><User size={17} /> Profile & settings</button>{role !== "admin" && role !== "member" && <button onClick={() => switchRole("member", "dashboard")}><Users size={17} /> Open member demo</button>}{role === "member" && <button onClick={() => switchRole("owner", "dashboard")}><ArrowLeft size={17} /> Exit member demo</button>}<button onClick={() => role === "admin" ? switchRole("guest", "dashboard") : switchRole("admin", "admin")}><ShieldCheck size={17} /> {role === "admin" ? "Exit admin preview" : "Open admin demo"}</button><button onClick={onExit}><LogOut size={17} /> Log out / exit</button></div>}</div>
+          {profileOpen && <div className="profile-popover"><button onClick={() => { navigate("settings"); setProfileOpen(false); }}><User size={17} /> Profile & settings</button><button onClick={onExit}><LogOut size={17} /> Log out / exit</button></div>}</div>
         </div>
       </header>
       {role === "guest" && <div className="guest-banner"><Eye size={17} /><span>You’re exploring preview data. Sign in to create, edit, save, or join a household.</span><button onClick={() => setAuthGate(true)}>Sign in for full access</button></div>}
@@ -636,7 +630,7 @@ function AppShell({ role, user, onRoleChange, onExit }: { role: Role; user: { id
       <main className="page-container">{page()}</main>
       <nav className="mobile-bottom">{activeNav.slice(0, 5).map(({ view: navView, label, icon: Icon }) => <button key={navView} className={view === navView ? "active" : ""} onClick={() => navigate(navView)}><Icon size={20} /><span>{label.split(" ")[0]}</span></button>)}</nav>
     </div>
-    {authGate && <Modal title="Sign in to continue" onClose={() => setAuthGate(false)}><div className="gate-content"><div className="gate-icon"><ShieldCheck /></div><h3>Your preview stays right here</h3><p>Create an account or log in to save changes, update inventory, manage households, and personalize alerts. Guest previews never access private household data.</p><Button onClick={() => { setAuthGate(false); onRoleChange("owner"); }}>Continue with demo account</Button><Button variant="secondary" onClick={() => setAuthGate(false)}>Keep exploring</Button></div></Modal>}
+    {authGate && <Modal title="Sign in to continue" onClose={() => setAuthGate(false)}><div className="gate-content"><div className="gate-icon"><ShieldCheck /></div><h3>Your preview stays right here</h3><p>Create an account or log in to save changes, update inventory, manage households, and personalize alerts. Guest previews never access private household data.</p><Button onClick={() => { setAuthGate(false); onRequestAuth(); }}>Log in or create account</Button><Button variant="secondary" onClick={() => setAuthGate(false)}>Keep exploring</Button></div></Modal>}
     {toast && <Toast text={toast} />}
   </div>;
 }
@@ -1140,40 +1134,39 @@ function ArrowRightIcon() { return <ChevronRight size={18} />; }
 
 export default function App() {
   const [entered, setEntered] = useState(false);
-  const [role, setRole] = useState<Role>("guest");
   const [auth, setAuth] = useState<"login" | "signup" | null>(null);
   const [currentUser, setCurrentUser] = useState<{
-  id: string;
-  email?: string;
-  user_metadata?: { full_name?: string };
-} | null>(null);
+    id: string;
+    email?: string;
+    user_metadata?: { full_name?: string };
+  } | null>(null);
+  const [sessionReady, setSessionReady] = useState(false);
 
-useEffect(() => {
-  let active = true;
-
-  supabase.auth.getSession().then(({ data, error }) => {
-    if (error) {
-      console.error("Unable to load Supabase session:", error.message);
-      return;
-    }
-
-    if (active) {
-      setCurrentUser(data.session?.user ?? null);
-    }
-  });
-
-  const {
-    data: { subscription },
-  } = supabase.auth.onAuthStateChange((_event, session) => {
-    setCurrentUser(session?.user ?? null);
-  });
-
-  return () => {
-    active = false;
-    subscription.unsubscribe();
-  };
-}, []);
   useEffect(() => {
+    let active = true;
+    supabase.auth.getSession().then(({ data, error }) => {
+      if (!active) return;
+      if (error) console.error("Unable to load Supabase session:", error.message);
+      setCurrentUser(data.session?.user ?? null);
+      if (data.session?.user) setEntered(true);
+      setSessionReady(true);
+    }).catch((error) => {
+      if (!active) return;
+      console.error("Unable to load Supabase session:", error);
+      setSessionReady(true);
+    });
+
+    const { data: { subscription } } = supabase.auth.onAuthStateChange((_event, session) => {
+      if (!active) return;
+      setCurrentUser(session?.user ?? null);
+      if (session?.user) setEntered(true);
+      setSessionReady(true);
+    });
+    return () => { active = false; subscription.unsubscribe(); };
+  }, []);
+
+  useEffect(() => {
+    const role: Role = currentUser ? "owner" : "guest";
     try {
       const stored = window.localStorage.getItem(`pantrylens-settings-${role}`);
       if (!stored) return;
@@ -1186,17 +1179,37 @@ useEffect(() => {
       root.dataset.largeText = preferences.largeText ? "true" : "false";
       root.dataset.reduceMotion = preferences.reduceMotion ? "true" : "false";
     } catch {
-      // Ignore malformed local prototype preferences and retain the default theme.
+      // Keep default appearance when local preferences are malformed.
     }
-  }, [role]);
-  const enterGuest = () => { setRole("guest"); setEntered(true); };
-  const authSuccess = () => { setAuth(null); setRole("owner"); setEntered(true); };
-  if (!entered) return <><Landing onEnter={enterGuest} onAuth={setAuth} />{auth && <AuthModal mode={auth} onClose={() => setAuth(null)} onSuccess={authSuccess} />}</>;
-  return (
-  <AppShell
-    role={role}
-    user={currentUser}
-    onRoleChange={(next) => setRole(next)}
-    onExit={() => setEntered(false)}
-  />
-);}
+  }, [currentUser]);
+
+  const exit = async () => {
+    if (currentUser) {
+      const { error } = await supabase.auth.signOut();
+      if (error) {
+        console.error("Unable to sign out:", error.message);
+        window.alert("Unable to sign out. Please try again.");
+        return;
+      }
+    }
+    setCurrentUser(null);
+    setEntered(false);
+    setAuth(null);
+  };
+
+  if (!sessionReady) return <main className="landing"><p role="status" style={{ padding: "2rem" }}>Loading PantryLens…</p></main>;
+  if (!entered) return <>
+    <Landing onEnter={() => setEntered(true)} onAuth={setAuth} />
+    {auth && <AuthModal mode={auth} onClose={() => setAuth(null)} onSuccess={() => { setAuth(null); setEntered(true); }} />}
+  </>;
+  return <>
+    <AppShell
+      key={currentUser?.id ?? "guest"}
+      role={currentUser ? "owner" : "guest"}
+      user={currentUser}
+      onRequestAuth={() => setAuth("login")}
+      onExit={exit}
+    />
+    {auth && <AuthModal mode={auth} onClose={() => setAuth(null)} onSuccess={() => { setAuth(null); setEntered(true); }} />}
+  </>;
+}
