@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">PantryLens</string>
+    <string name="title_activity_main">PantryLens</string>
+    <string name="package_name">com.pantrylens.app</string>
+    <string name="custom_url_scheme">com.pantrylens.app</string>
+</resources>

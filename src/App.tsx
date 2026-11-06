@@ -125,7 +125,7 @@ const memberNavItems: { view: View; label: string; icon: typeof Home }[] = [
   { view: "household", label: "Household access", icon: Users },
 ];
 
-const categories = ["Vegetables", "Fruits", "Meat", "Seafood", "Dairy", "Eggs", "Grains", "Canned Goods", "Condiments", "Beverages", "Frozen Food", "Other"];
+const categories = ["Meat", "Vegetables"];
 const locations = ["Refrigerator", "Freezer", "Pantry Cabinet", "Kitchen Counter", "Other"];
 
 function Button({ children, variant = "primary", icon, onClick, type = "button", className = "", disabled = false }: { children: ReactNode; variant?: "primary" | "secondary" | "ghost" | "danger" | "soft"; icon?: ReactNode; onClick?: () => void; type?: "button" | "submit"; className?: string; disabled?: boolean }) {
@@ -517,7 +517,7 @@ function AuthModal({
 function AppShell({ role, user, onRoleChange, onExit }: { role: Role; user: { id: string; email?: string; user_metadata?: { full_name?: string } } | null; onRoleChange: (role: Role) => void; onExit: () => void }) {
   const [view, setView] = useState<View>(role === "admin" ? "admin" : "dashboard");
   const [items, setItems] = useState<Item[]>(role === "guest" ? initialItems : []);
-  const [workspace, setWorkspace] = useState<Workspace>(role === "owner" ? "personal" : "household");
+  const [workspace, setWorkspace] = useState<Workspace>("personal");
   const [mobileOpen, setMobileOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
   const [contextOpen, setContextOpen] = useState(false);
@@ -561,13 +561,6 @@ function AppShell({ role, user, onRoleChange, onExit }: { role: Role; user: { id
   };
   const gated = (action: () => void) => { if (role === "guest") setAuthGate(true); else action(); };
   const notify = (text: string) => { setToast(text); window.setTimeout(() => setToast(""), 2600); };
-  const switchRole = (nextRole: Role, nextView: View) => {
-    onRoleChange(nextRole);
-    setView(nextView);
-    setProfileOpen(false);
-    setContextOpen(false);
-  };
-
   const page = () => {
     if (view === "dashboard") return <Dashboard navigate={navigate} role={role} items={items} user={user} />;
     if (view === "inventory" || view === "shared") return <Inventory items={items} setItems={setItems} role={role} gated={gated} notify={notify} shared={view === "shared"} navigate={navigate} />;
@@ -607,17 +600,55 @@ function AppShell({ role, user, onRoleChange, onExit }: { role: Role; user: { id
       <header className="topbar">
         <button className="menu-btn" onClick={() => setMobileOpen(true)} aria-label="Open navigation" aria-controls="primary-navigation" aria-expanded={mobileOpen}><Menu /></button>
         <div className="context-menu">
-          <button className="context-switcher" disabled={role === "admin" || role === "member"} onClick={() => setContextOpen(!contextOpen)} aria-expanded={contextOpen}>
-            <span className="avatar-house">{role === "admin" ? "PL" : role === "member" ? "DC" : workspace === "personal" ? accountInitials : "DC"}</span>
-            <span><small>{role === "admin" ? "Protected area" : role === "member" ? "Shared access" : "Viewing pantry"}</small><b>{role === "admin" ? "PantryLens system" : role === "member" ? "Dela Cruz Home" : workspace === "personal" ? `${accountName}’s personal pantry` : "Dela Cruz Home"}</b></span>
-            {role !== "admin" && role !== "member" && <ChevronDown size={16} />}
+          <button
+            className="context-switcher"
+            onClick={() => setContextOpen(!contextOpen)}
+            aria-expanded={contextOpen}
+          >
+            <span className="avatar-house">{accountInitials}</span>
+
+            <span>
+              <small>Viewing pantry</small>
+              <b>{accountName}'s personal pantry</b>
+            </span>
+
+            <ChevronDown size={16} />
           </button>
-          {contextOpen && <div className="context-popover">
-            <small>Choose workspace</small>
-            <button className={workspace === "personal" ? "active" : ""} onClick={() => { setWorkspace("personal"); navigate("dashboard"); }}><User size={17} /><span><b>Personal pantry</b><small>Private to this account</small></span>{workspace === "personal" && <Check size={16} />}</button>
-            <button className={workspace === "household" ? "active" : ""} onClick={() => { setWorkspace("household"); navigate("dashboard"); }}><Users size={17} /><span><b>Dela Cruz Home</b><small>Shared household inventory</small></span>{workspace === "household" && <Check size={16} />}</button>
-            <button onClick={() => gated(() => { setWorkspace("personal"); navigate("household"); })}><Plus size={17} /><span><b>Create a household</b><small>Start from your personal pantry</small></span></button>
-          </div>}
+
+          {contextOpen && (
+            <div className="context-popover">
+              <small>Choose workspace</small>
+
+              <button
+                className="active"
+                onClick={() => {
+                  setWorkspace("personal");
+                  setContextOpen(false);
+                  navigate("dashboard");
+                }}
+              >
+                <User size={17} />
+                <span>
+                  <b>Personal pantry</b>
+                  <small>Private to this account</small>
+                </span>
+                <Check size={16} />
+              </button>
+
+              <button
+                onClick={() => {
+                  setContextOpen(false);
+                  gated(() => navigate("household"));
+                }}
+              >
+                <Plus size={17} />
+                <span>
+                  <b>Create or join a household</b>
+                  <small>Manage your household access</small>
+                </span>
+              </button>
+            </div>
+          )}
         </div>
         <div className="top-actions">
           {(role === "owner" || role === "guest") && <Button className="top-add" onClick={() => gated(() => navigate("add"))} icon={<Plus size={17} />}>Add item</Button>}
@@ -640,7 +671,22 @@ function AppShell({ role, user, onRoleChange, onExit }: { role: Role; user: { id
         ? "Administrator preview"
         : user?.email || "No email available"}
 </small></span><ChevronDown size={16} /></button>
-          {profileOpen && <div className="profile-popover"><button onClick={() => { navigate("settings"); setProfileOpen(false); }}><User size={17} /> Profile & settings</button>{role !== "admin" && role !== "member" && <button onClick={() => switchRole("member", "dashboard")}><Users size={17} /> Open member demo</button>}{role === "member" && <button onClick={() => switchRole("owner", "dashboard")}><ArrowLeft size={17} /> Exit member demo</button>}<button onClick={() => role === "admin" ? switchRole("guest", "dashboard") : switchRole("admin", "admin")}><ShieldCheck size={17} /> {role === "admin" ? "Exit admin preview" : "Open admin demo"}</button><button onClick={onExit}><LogOut size={17} /> Log out / exit</button></div>}</div>
+          {profileOpen && (
+            <div className="profile-popover">
+              <button
+                onClick={() => {
+                  navigate("settings");
+                  setProfileOpen(false);
+                }}
+              >
+                <User size={17} /> Profile & settings
+              </button>
+
+              <button onClick={onExit}>
+                <LogOut size={17} /> Log out / exit
+              </button>
+            </div>
+          )}</div>
         </div>
       </header>
       {role === "guest" && <div className="guest-banner"><Eye size={17} /><span>You’re exploring preview data. Sign in to create, edit, save, or join a household.</span><button onClick={() => setAuthGate(true)}>Sign in for full access</button></div>}
@@ -649,7 +695,14 @@ function AppShell({ role, user, onRoleChange, onExit }: { role: Role; user: { id
       <main className="page-container">{page()}</main>
       <nav className="mobile-bottom">{activeNav.slice(0, 5).map(({ view: navView, label, icon: Icon }) => <button key={navView} className={view === navView ? "active" : ""} onClick={() => navigate(navView)}><Icon size={20} /><span>{label.split(" ")[0]}</span></button>)}</nav>
     </div>
-    {authGate && <Modal title="Sign in to continue" onClose={() => setAuthGate(false)}><div className="gate-content"><div className="gate-icon"><ShieldCheck /></div><h3>Your preview stays right here</h3><p>Create an account or log in to save changes, update inventory, manage households, and personalize alerts. Guest previews never access private household data.</p><Button onClick={() => { setAuthGate(false); onRoleChange("owner"); }}>Continue with demo account</Button><Button variant="secondary" onClick={() => setAuthGate(false)}>Keep exploring</Button></div></Modal>}
+    {authGate && <Modal title="Sign in to continue" onClose={() => setAuthGate(false)}><div className="gate-content"><div className="gate-icon"><ShieldCheck /></div><h3>Your preview stays right here</h3><p>Create an account or log in to save changes, update inventory, manage households, and personalize alerts. Guest previews never access private household data.</p><Button
+  onClick={() => {
+    setAuthGate(false);
+    onExit();
+  }}
+>
+  Go to login
+</Button><Button variant="secondary" onClick={() => setAuthGate(false)}>Keep exploring</Button></div></Modal>}
     {toast && <Toast text={toast} />}
   </div>;
 }
@@ -748,7 +801,7 @@ function AddItem({ role, gated, notify, navigate }: { role: Role; gated: (fn: ()
   const submit = (event: React.FormEvent) => { event.preventDefault(); gated(() => { notify(`${name || "Food item"} added to demo inventory`); navigate("inventory"); }); };
   return <>
     <PageHeader eyebrow="Inventory" title="Add food manually" description="Record an item with the details you know. You can update them anytime." />
-    <form className="form-layout" onSubmit={submit}><Card className="form-card"><h2>Item information</h2><p>Fields marked required keep inventory quantities accurate.</p><Input label="Food name *" placeholder="e.g. Bangus" value={name} onChange={(e) => setName(e.target.value)} required /><Select label="Food category *" required><option value="">Select category</option>{categories.map((c) => <option key={c}>{c}</option>)}</Select><div className="split-fields"><Input label="Quantity *" type="number" min="0.01" step="0.01" required /><Select label="Unit *" defaultValue={defaults.units === "Metric" ? "kilograms" : "pieces"}><option>pieces</option><option>kilograms</option><option>grams</option><option>liters</option><option>milliliters</option><option>cans</option><option>packs</option><option>bunches</option></Select></div><Select label="Storage location *" defaultValue={defaults.storage}>{locations.map((l) => <option key={l}>{l}</option>)}</Select><div className="split-fields"><Input label="Purchase date" type="date" /><Input label="Expiration date" type="date" /></div><Input label="Minimum-stock threshold" type="number" min="0" defaultValue={defaults.lowStockDefault} /><label className="field"><span>Notes</span><textarea placeholder="Brand, packaging, or household notes" rows={4} /></label></Card><aside><Card className="image-upload-small"><ImagePlus /><h3>Add an item photo</h3><p>Optional. Images will use Supabase Storage after backend integration.</p><Button variant="secondary" onClick={() => notify("Image picker opened in demo mode")}>Choose image</Button></Card>{name.toLowerCase().includes("egg") && <Card className="duplicate-warning"><AlertTriangle /><div><b>Possible duplicate</b><p>Eggs already exists with 8 pcs in the refrigerator.</p><button type="button" onClick={() => navigate("inventory")}>Review existing item</button></div></Card>}<div className="sticky-actions"><Button variant="secondary" onClick={() => navigate("inventory")}>Cancel</Button><Button type="submit">Add to pantry</Button></div></aside></form>
+    <form className="form-layout" onSubmit={submit}><Card className="form-card"><h2>Item information</h2><p>Fields marked required keep inventory quantities accurate.</p><Input label="Food name *" placeholder="e.g. Chicken, Pork, Eggplant, or Pechay" value={name} onChange={(e) => setName(e.target.value)} required /><Select label="Food category *" required><option value="">Select category</option>{categories.map((c) => <option key={c}>{c}</option>)}</Select><div className="split-fields"><Input label="Quantity *" type="number" min="0.01" step="0.01" required /><Select label="Unit *" defaultValue={defaults.units === "Metric" ? "kilograms" : "pieces"}><option>pieces</option><option>kilograms</option><option>grams</option><option>liters</option><option>milliliters</option><option>cans</option><option>packs</option><option>bunches</option></Select></div><Select label="Storage location *" defaultValue={defaults.storage}>{locations.map((l) => <option key={l}>{l}</option>)}</Select><div className="split-fields"><Input label="Purchase date" type="date" /><Input label="Expiration date" type="date" /></div><Input label="Minimum-stock threshold" type="number" min="0" defaultValue={defaults.lowStockDefault} /><label className="field"><span>Notes</span><textarea placeholder="Brand, packaging, or household notes" rows={4} /></label></Card><aside><Card className="image-upload-small"><ImagePlus /><h3>Add an item photo</h3><p>Optional. Images will use Supabase Storage after backend integration.</p><Button variant="secondary" onClick={() => notify("Image picker opened in demo mode")}>Choose image</Button></Card>{name.toLowerCase().includes("egg") && <Card className="duplicate-warning"><AlertTriangle /><div><b>Possible duplicate</b><p>Eggs already exists with 8 pcs in the refrigerator.</p><button type="button" onClick={() => navigate("inventory")}>Review existing item</button></div></Card>}<div className="sticky-actions"><Button variant="secondary" onClick={() => navigate("inventory")}>Cancel</Button><Button type="submit">Add to pantry</Button></div></aside></form>
   </>;
 }
 
@@ -767,25 +820,127 @@ function Monitoring({ items, navigate, role, gated, notify }: { items: Item[]; n
   </>;
 }
 
-function UsageHistory({ role, gated, notify }: { role: Role; gated: (fn: () => void) => void; notify: (s: string) => void }) {
-  const [modal, setModal] = useState(false);
+function UsageHistory({
+  role,
+  gated,
+  notify,
+}: {
+  role: Role;
+  gated: (fn: () => void) => void;
+  notify: (s: string) => void;
+}) {
   const [query, setQuery] = useState("");
   const [itemFilter, setItemFilter] = useState("All items");
   const [memberFilter, setMemberFilter] = useState("All members");
   const [dateFilter, setDateFilter] = useState("");
-  const history = [
-    { time: "Today, 8:40 AM", date: "2026-09-08", item: "Eggs", change: "2 pcs consumed", member: "Maria Dela Cruz", note: "Breakfast", added: false },
-    { time: "Sep 7, 6:12 PM", date: "2026-09-07", item: "Chicken thighs", change: "0.4 kg consumed", member: "Juan Dela Cruz", note: "Chicken adobo", added: false },
-    { time: "Sep 6, 12:22 PM", date: "2026-09-06", item: "Rice", change: "0.5 kg consumed", member: "Juan Dela Cruz", note: "Weekly meal prep", added: false },
-    { time: "Sep 5, 5:30 PM", date: "2026-09-05", item: "Pechay", change: "1 bunch added", member: "Maria Dela Cruz", note: "Grocery restock", added: true },
-  ];
-  const filteredHistory = history.filter((row) => `${row.item} ${row.note}`.toLowerCase().includes(query.toLowerCase()) && (itemFilter === "All items" || row.item === itemFilter) && (memberFilter === "All members" || row.member.startsWith(memberFilter)) && (!dateFilter || row.date === dateFilter));
-  return <>
-    <PageHeader eyebrow="Inventory audit" title="Food usage history" description="Track what changed, when it changed, and who recorded it." actions={<Button onClick={() => gated(() => setModal(true))} icon={<Minus size={17} />}>Record food usage</Button>} />
-    <Card className="inventory-toolbar usage-filters"><Input aria-label="Search usage history" placeholder="Search usage…" value={query} onChange={(event) => setQuery(event.target.value)} icon={<Search size={18} />} /><Select aria-label="Filter usage by item" value={itemFilter} onChange={(event) => setItemFilter(event.target.value)}><option>All items</option><option>Eggs</option><option>Chicken thighs</option><option>Rice</option><option>Pechay</option></Select><Select aria-label="Filter usage by member" value={memberFilter} onChange={(event) => setMemberFilter(event.target.value)}><option>All members</option><option>Juan</option><option>Maria</option></Select><Input aria-label="Filter usage by date" type="date" value={dateFilter} onChange={(event) => setDateFilter(event.target.value)} /></Card>
-    <Card className="timeline-card">{filteredHistory.map((row) => <div className="history-row" key={row.time}><span className={row.added ? "add" : "consume"}>{row.added ? <Plus /> : <Minus />}</span><div><small>{row.time}</small><h3>{row.item}</h3><p>{row.change} · {row.note}</p></div><div><small>Recorded by</small><b>{row.member}</b></div><button aria-label={`View ${row.item} history details`} onClick={() => notify(`${row.item} history detail opened`)}><ChevronRight /></button></div>)}{filteredHistory.length === 0 && <div className="empty-state compact"><CheckCircle2 /><h3>Nothing to review here</h3><p>Your pantry has no items in this state.</p></div>}</Card>
-    {modal && <Modal title="Record food usage" onClose={() => setModal(false)}><form className="form-stack" onSubmit={(e) => { e.preventDefault(); setModal(false); notify("Usage recorded; quantity updated in demo"); }}><Select label="Food item *"><option>Eggs · 8 pcs available</option><option>Chicken thighs · 1.2 kg available</option></Select><div className="split-fields"><Input label="Quantity used *" type="number" min="0.01" max="8" required /><Select label="Unit"><option>pcs</option><option>kg</option></Select></div><Input label="Usage date *" type="date" required /><Select label="Used by"><option>Current user — Juan</option><option>Maria Dela Cruz</option></Select><Input label="Notes" placeholder="e.g. Breakfast" /><p className="field-help">PantryLens prevents usage from reducing available quantity below zero.</p><div className="modal-actions"><Button variant="secondary" onClick={() => setModal(false)}>Cancel</Button><Button type="submit">Record usage</Button></div></form></Modal>}
-  </>;
+
+  // No usage records are loaded until real persistence is connected.
+  type UsageRecord = {
+    id: string;
+    time: string;
+    date: string;
+    item: string;
+    change: string;
+    member: string;
+    note: string;
+    added: boolean;
+  };
+
+  const history: UsageRecord[] = [];
+
+  const filteredHistory = history.filter(
+    (row) =>
+      `${row.item} ${row.note}`
+        .toLowerCase()
+        .includes(query.toLowerCase()) &&
+      (itemFilter === "All items" || row.item === itemFilter) &&
+      (memberFilter === "All members" ||
+        row.member === memberFilter) &&
+      (!dateFilter || row.date === dateFilter)
+  );
+
+  return (
+    <>
+      <PageHeader
+        eyebrow="Inventory audit"
+        title="Food usage history"
+        description="Review recorded food usage and inventory changes."
+        actions={
+          <Button
+            disabled
+            icon={<Minus size={17} />}
+          >
+            Record food usage
+          </Button>
+        }
+      />
+
+      <Card className="inventory-toolbar usage-filters">
+        <Input
+          aria-label="Search usage history"
+          placeholder="Search usage..."
+          value={query}
+          onChange={(event) => setQuery(event.target.value)}
+          icon={<Search size={18} />}
+        />
+
+        <Select
+          aria-label="Filter usage by item"
+          value={itemFilter}
+          onChange={(event) => setItemFilter(event.target.value)}
+        >
+          <option>All items</option>
+        </Select>
+
+        <Select
+          aria-label="Filter usage by member"
+          value={memberFilter}
+          onChange={(event) => setMemberFilter(event.target.value)}
+        >
+          <option>All members</option>
+        </Select>
+
+        <Input
+          aria-label="Filter usage by date"
+          type="date"
+          value={dateFilter}
+          onChange={(event) => setDateFilter(event.target.value)}
+        />
+      </Card>
+
+      <Card className="timeline-card">
+        {filteredHistory.map((row) => (
+          <div className="history-row" key={row.id}>
+            <span className={row.added ? "add" : "consume"}>
+              {row.added ? <Plus /> : <Minus />}
+            </span>
+
+            <div>
+              <small>{row.time}</small>
+              <h3>{row.item}</h3>
+              <p>{row.change} · {row.note}</p>
+            </div>
+
+            <div>
+              <small>Recorded by</small>
+              <b>{row.member}</b>
+            </div>
+          </div>
+        ))}
+
+        {filteredHistory.length === 0 && (
+          <div className="empty-state compact">
+            <CheckCircle2 />
+            <h3>No food usage records loaded</h3>
+            <p>
+              Usage history is not yet connected to Supabase.
+              No sample activity is displayed.
+            </p>
+          </div>
+        )}
+      </Card>
+    </>
+  );
 }
 
 function Recipes({ navigate, role, gated, notify }: { navigate: (v: View) => void; role: Role; gated: (fn: () => void) => void; notify: (s: string) => void }) {
@@ -818,57 +973,245 @@ function RecipeDetail({ navigate, role, gated, notify }: { navigate: (v: View) =
 }
 
 function ShoppingList({ role, gated, notify }: { role: Role; gated: (fn: () => void) => void; notify: (s: string) => void }) {
-  const [items, setItems] = useState([{ id: 1, name: "Bay leaves", qty: "1 pack", bought: false, source: "Chicken Adobo" }, { id: 2, name: "Mung beans", qty: "500 g", bought: false, source: "Ginisang Monggo" }, { id: 3, name: "Ginger", qty: "1 piece", bought: true, source: "Chicken Tinola" }, { id: 4, name: "Dish soap", qty: "1 bottle", bought: false, source: "Added manually" }]);
+  const [items, setItems] = useState<
+    { id: number; name: string; qty: string; bought: boolean; source: string }[]
+  >([]);
   const [filter, setFilter] = useState("All");
   const visible = items.filter((i) => filter === "All" || (filter === "To buy" ? !i.bought : i.bought));
   return <>
     <PageHeader eyebrow="Plan ahead" title="Shopping list" description="Recipe needs and household essentials, checked against your pantry." actions={<Button onClick={() => gated(() => notify("Manual shopping item added"))} icon={<Plus size={17} />}>Add item</Button>} />
-    <div className="shopping-layout"><Card><div className="shopping-head"><div className="tabs"><button className={filter === "All" ? "active" : ""} onClick={() => setFilter("All")}>All {items.length}</button><button className={filter === "To buy" ? "active" : ""} onClick={() => setFilter("To buy")}>To buy {items.filter((i) => !i.bought).length}</button><button className={filter === "Purchased" ? "active" : ""} onClick={() => setFilter("Purchased")}>Purchased {items.filter((i) => i.bought).length}</button></div><Button variant="ghost" onClick={() => gated(() => setItems(items.filter((i) => !i.bought)))}>Clear purchased</Button></div><div className="shopping-items">{visible.map((item) => <div key={item.id} className={item.bought ? "purchased" : ""}><button className="check-button" onClick={() => gated(() => setItems(items.map((i) => i.id === item.id ? { ...i, bought: !i.bought } : i)))}>{item.bought && <Check />}</button><span><b>{item.name}</b><small>{item.source}</small></span><strong>{item.qty}</strong><button onClick={() => gated(() => setItems(items.filter((i) => i.id !== item.id)))} aria-label={`Remove ${item.name}`}><Trash2 /></button></div>)}</div></Card><aside><Card className="pantry-check"><h2>Pantry check</h2><p>PantryLens found a related item already at home.</p><div><span className="food-initial">GA</span><span><b>Garlic</b><small>1 head available · low stock</small></span></div></Card><Card className="info-banner vertical"><CircleHelp /><div><b>Purchased isn’t stocked yet</b><p>After shopping, confirm quantity, storage location, and dates before adding purchased items to inventory.</p></div><Button variant="secondary" onClick={() => gated(() => notify("Purchased item confirmation opened"))}>Review purchased items</Button></Card></aside></div>
+    <div className="shopping-layout"><Card><div className="shopping-head"><div className="tabs"><button className={filter === "All" ? "active" : ""} onClick={() => setFilter("All")}>All {items.length}</button><button className={filter === "To buy" ? "active" : ""} onClick={() => setFilter("To buy")}>To buy {items.filter((i) => !i.bought).length}</button><button className={filter === "Purchased" ? "active" : ""} onClick={() => setFilter("Purchased")}>Purchased {items.filter((i) => i.bought).length}</button></div><Button variant="ghost" onClick={() => gated(() => setItems(items.filter((i) => !i.bought)))}>Clear purchased</Button></div><div className="shopping-items">{visible.map((item) => <div key={item.id} className={item.bought ? "purchased" : ""}><button className="check-button" onClick={() => gated(() => setItems(items.map((i) => i.id === item.id ? { ...i, bought: !i.bought } : i)))}>{item.bought && <Check />}</button><span><b>{item.name}</b><small>{item.source}</small></span><strong>{item.qty}</strong><button onClick={() => gated(() => setItems(items.filter((i) => i.id !== item.id)))} aria-label={`Remove ${item.name}`}><Trash2 /></button></div>)}</div></Card><aside><Card className="pantry-check">
+      <h2>Pantry check</h2>
+      <p>
+        Pantry availability will appear here once
+        your shopping list and inventory are connected.
+      </p>
+      <div className="empty-state compact">
+        <Package size={24} />
+        <h3>No pantry matches loaded</h3>
+        <p>No sample inventory is displayed.</p>
+      </div>
+    </Card><Card className="info-banner vertical"><CircleHelp /><div><b>Purchased isn’t stocked yet</b><p>After shopping, confirm quantity, storage location, and dates before adding purchased items to inventory.</p></div><Button variant="secondary" onClick={() => gated(() => notify("Purchased item confirmation opened"))}>Review purchased items</Button></Card></aside></div>
   </>;
 }
 
-function Household({ role, workspace, setWorkspace, gated, notify, navigate, user }: { role: Role; workspace: Workspace; setWorkspace: (workspace: Workspace) => void; gated: (fn: () => void) => void; notify: (s: string) => void; navigate: (v: View) => void; user: { id: string; email?: string; user_metadata?: { full_name?: string } } | null }) {
-  const accountName = user?.user_metadata?.full_name?.trim() || user?.email?.split("@")[0] || "My account";
-  const [invite, setInvite] = useState(false);
-  const [create, setCreate] = useState(false);
-  const [leave, setLeave] = useState(false);
-  if (role === "member") return <>
-    <PageHeader eyebrow="Household membership" title="Dela Cruz Home" description="Your personal account remains separate from the records shared with you." actions={<Button variant="danger" onClick={() => setLeave(true)}>Leave household</Button>} />
-    <Card className="household-hero"><div className="household-avatar">DC</div><div><Badge tone="info">Household member</Badge><h2>Dela Cruz Home</h2><p>Joined August 28, 2026 · Relationship label: Partner</p></div><Button variant="secondary" onClick={() => navigate("shared")}>Open shared pantry</Button></Card>
-    <div className="household-grid"><Card><div className="card-heading"><div><h2>Your permissions</h2><p>Permissions come from household membership, not the relationship label.</p></div></div><div className="permission-list"><span><CheckCircle2 /> View shared inventory</span><span><CheckCircle2 /> Record food usage</span><span><CheckCircle2 /> Update 3 assigned records</span><span className="muted"><X /> Delete items or manage members</span></div></Card><Card><div className="card-heading"><div><h2>Assigned inventory</h2><p>Records the household owner has authorized you to update.</p></div><Badge tone="info">3 assigned</Badge></div>{[["EG", "Eggplant", "3 pcs"], ["CH", "Chicken thighs", "1.2 kg"], ["EE", "Eggs", "8 pcs"]].map((item) => <div className="assigned-row" key={item[1]}><span>{item[0]}</span><div><b>{item[1]}</b><small>{item[2]} · Update permitted</small></div><Button variant="ghost" onClick={() => navigate("shared")}>View</Button></div>)}</Card></div>
-    <Card className="info-banner"><ShieldCheck size={20} /><div><b>Authorization boundary</b><p>The interface hides owner-only actions. Production access to shared and assigned records must also be enforced with authenticated membership checks and database row-level policies.</p></div></Card>
-    {leave && <Modal title="Leave Dela Cruz Home?" onClose={() => setLeave(false)}><div className="warning-box"><AlertTriangle /><p>You will lose access to shared inventory and assigned records. Your personal pantry will not be deleted or transferred.</p></div><div className="modal-actions"><Button variant="secondary" onClick={() => setLeave(false)}>Cancel</Button><Button variant="danger" onClick={() => { setLeave(false); notify("Leave request simulated; backend membership was not changed"); navigate("dashboard"); }}>Leave household</Button></div></Modal>}
-  </>;
-  if (workspace === "personal") return <>
-    <PageHeader eyebrow="Personal workspace" title="You’re working independently" description="Your personal pantry is private. Create a household only when you’re ready to share selected records." actions={<Button onClick={() => gated(() => setCreate(true))} icon={<Users size={17} />}>Create household</Button>} />
-    <Card className="standalone-card"><div className="standalone-icon"><User /></div><div><Badge tone="success">Personal pantry active</Badge><h2>{accountName}’s personal pantry</h2><p>Add, scan, monitor, and cook from your own inventory without creating or joining a household.</p><div className="hero-actions"><Button onClick={() => navigate("inventory")}>Open personal pantry</Button><Button variant="secondary" onClick={() => gated(() => setCreate(true))}>Share with a new household</Button></div></div></Card>
-    <div className="household-grid"><Card className="household-setting"><span><ShieldCheck /></span><div><h3>Private by default</h3><p>No personal inventory is transferred or merged when you create or join a household.</p></div></Card><Card className="household-setting"><span><UserPlus /></span><div><h3>Have an invitation?</h3><p>Validate a household code, then explicitly choose what remains personal.</p></div><Button variant="secondary" onClick={() => gated(() => notify("Join-household review opened"))}>Join with code</Button></Card></div>
-    {create && <Modal title="Create a household" onClose={() => setCreate(false)}><form className="form-stack" onSubmit={(event) => { event.preventDefault(); setCreate(false); setWorkspace("household"); notify("Demo household created; personal inventory remained separate"); }}><Input label="Household name *" placeholder="e.g. Dela Cruz Home" required /><Input label="Description" placeholder="Optional household description" /><div className="auth-note"><ShieldCheck size={16} />Creating a household does not merge or transfer your personal inventory. Sharing is configured per record.</div><div className="modal-actions"><Button variant="secondary" onClick={() => setCreate(false)}>Cancel</Button><Button type="submit">Create household</Button></div></form></Modal>}
-  </>;
-  return <>
-    <PageHeader eyebrow="Shared household" title="Dela Cruz Home" description="Share selected pantry records while keeping personal inventory separate." actions={<Button onClick={() => gated(() => setInvite(true))} icon={<UserPlus size={17} />}>Invite member</Button>} />
-    <Card className="household-hero"><div className="household-avatar">DC</div><div><Badge tone="success">You are the owner</Badge><h2>Dela Cruz Home</h2><p>Family pantry for our Quezon City home · 3 active members</p></div><div className="invite-code"><small>Invitation code</small><b>DELA-2841</b><Button variant="secondary" onClick={() => gated(() => notify("Invitation code copied"))}>Copy code</Button></div></Card>
-    <div className="household-grid"><Card><div className="card-heading"><div><h2>Household members</h2><p>Relationship labels do not grant permissions.</p></div><Badge>3 active</Badge></div>{[["MD", "Maria Dela Cruz", "Partner", "Can update shared items"], ["AD", "Ana Dela Cruz", "Family", "3 assigned records"], ["PD", "Paolo Dela Cruz", "Family", "View and record usage"]].map((member, i) => <div className="member-row" key={member[1]}><span>{member[0]}</span><div><b>{member[1]}</b><small>{member[2]} · {member[3]}</small></div><Badge tone={i === 0 ? "success" : "neutral"}>{i === 0 ? "Co-manager" : "Member"}</Badge><button aria-label={`Manage ${member[1]}`} onClick={() => gated(() => notify("Member permission controls opened"))}><MoreHorizontal /></button></div>)}</Card><Card><h2>Pending invitations</h2><p className="card-intro">Email delivery requires backend configuration.</p><div className="pending-invite"><span>RJ</span><div><b>rosa@example.com</b><small>Friend · expires in 5 days</small></div><Badge tone="warning">Pending</Badge></div><div className="pending-invite"><span>KM</span><div><b>Invite code request</b><small>Requested by Kai Mendoza</small></div><div><Button variant="soft" onClick={() => gated(() => notify("Invitation accepted"))}>Accept</Button><Button variant="ghost" onClick={() => gated(() => notify("Invitation declined"))}>Decline</Button></div></div></Card></div>
-    <div className="household-grid"><Card className="household-setting"><span><Warehouse /></span><div><h3>Shared inventory</h3><p>28 items are visible to household members; 3 are assigned to Ana.</p></div><Button variant="secondary" onClick={() => navigate("shared")}>Manage access</Button></Card><Card className="household-setting"><span><ShieldCheck /></span><div><h3>Sharing permissions</h3><p>Members can view, record usage, and edit assigned records only.</p></div><Button variant="secondary" onClick={() => gated(() => navigate("settings"))}>Configure</Button></Card></div>
-    <Card className="join-card"><div><h2>Joining another household?</h2><p>Use an invitation code. PantryLens will ask whether you want to keep personal inventory separate—nothing is merged automatically.</p></div><Input placeholder="Enter invitation code" /><Button onClick={() => gated(() => notify("Invitation code validated in demo"))}>Check code</Button></Card>
-    {invite && <Modal title="Invite a household member" onClose={() => setInvite(false)}><form className="form-stack" onSubmit={(e) => { e.preventDefault(); setInvite(false); notify("Demo invitation created; no email was sent"); }}><Input label="Email address" type="email" required placeholder="member@example.com" /><Select label="Relationship label"><option>Family</option><option>Friend</option><option>Partner</option><option>Other</option></Select><Select label="Initial permission"><option>View and record usage</option><option>Update assigned records</option><option>Household co-manager</option></Select><div className="auth-note"><CircleHelp size={16} />This prototype records a simulated invitation only. It does not send email.</div><div className="modal-actions"><Button variant="secondary" onClick={() => setInvite(false)}>Cancel</Button><Button type="submit">Create invitation</Button></div></form></Modal>}
-  </>;
+function Household({
+  role,
+  workspace,
+  setWorkspace,
+  gated,
+  notify,
+  navigate,
+  user,
+}: {
+  role: Role;
+  workspace: Workspace;
+  setWorkspace: (workspace: Workspace) => void;
+  gated: (fn: () => void) => void;
+  notify: (s: string) => void;
+  navigate: (v: View) => void;
+  user: {
+    id: string;
+    email?: string;
+    user_metadata?: { full_name?: string };
+  } | null;
+}) {
+  const accountName =
+    user?.user_metadata?.full_name?.trim() ||
+    user?.email?.split("@")[0] ||
+    "My account";
+
+  return (
+    <>
+      <PageHeader
+        eyebrow="Household management"
+        title="Your household"
+        description="Manage your personal pantry and household sharing."
+        actions={
+          <Button disabled icon={<Users size={17} />}>
+            Create household
+          </Button>
+        }
+      />
+
+      <Card className="standalone-card">
+        <div className="standalone-icon">
+          <User />
+        </div>
+
+        <div>
+          <Badge tone="success">Personal workspace</Badge>
+
+          <h2>{accountName}'s personal pantry</h2>
+
+          <p>
+            Your personal pantry is available independently of
+            household membership.
+          </p>
+
+          <div className="hero-actions">
+            <Button onClick={() => navigate("inventory")}>
+              Open personal pantry
+            </Button>
+
+            <Button variant="secondary" disabled>
+              Create household
+            </Button>
+          </div>
+        </div>
+      </Card>
+
+      <div className="household-grid">
+        <Card className="household-setting">
+          <span>
+            <Users />
+          </span>
+
+          <div>
+            <h3>Household membership</h3>
+            <p>
+              No household records have been loaded from
+              Supabase yet.
+            </p>
+          </div>
+        </Card>
+
+        <Card className="household-setting">
+          <span>
+            <UserPlus />
+          </span>
+
+          <div>
+            <h3>Join a household</h3>
+            <p>
+              Invitation-code validation will be available
+              after backend integration.
+            </p>
+          </div>
+
+          <Button variant="secondary" disabled>
+            Join household
+          </Button>
+        </Card>
+      </div>
+
+      <Card className="household-hero">
+        <div className="household-avatar">
+          <Users />
+        </div>
+
+        <div>
+          <Badge tone="neutral">Not loaded</Badge>
+
+          <h2>No household data loaded</h2>
+
+          <p>
+            Household names, members, invitations, and
+            permissions will appear here after they are
+            retrieved for your authenticated account.
+          </p>
+        </div>
+      </Card>
+
+      <Card className="info-banner">
+        <ShieldCheck size={20} />
+
+        <div>
+          <b>Household access</b>
+          <p>
+            Household permissions must be verified through
+            Supabase membership records and database
+            row-level security.
+          </p>
+        </div>
+      </Card>
+    </>
+  );
 }
 
-function Notifications({ count, setCount, role, gated }: { count: number; setCount: (n: number) => void; role: Role; gated: (fn: () => void) => void }) {
+function Notifications({
+  count,
+  setCount,
+  role,
+  gated,
+}: {
+  count: number;
+  setCount: (n: number) => void;
+  role: Role;
+  gated: (fn: () => void) => void;
+}) {
   const [filter, setFilter] = useState("All");
-  const notificationRows = [
-    { tone: "warning", category: "Pantry", title: "Eggplant expires soon", detail: "Use 3 eggplants before September 9. Tortang Talong is an 88% match.", time: "12 minutes ago" },
-    { tone: "danger", category: "Pantry", title: "Tomatoes are expired", detail: "Review 2 tomatoes in your refrigerator. Expired items are never removed automatically.", time: "2 hours ago" },
-    { tone: "success", category: "Pantry", title: "Demo scan completed", detail: "2 food items were recognized and are ready for your review.", time: "Yesterday" },
-    { tone: "info", category: "Household", title: "Maria updated shared inventory", detail: "2 eggs were recorded as consumed from Dela Cruz Home.", time: "Yesterday" },
-    { tone: "neutral", category: "Account", title: "New sign-in to your demo account", detail: "Chrome on macOS · Quezon City · simulated security event", time: "Sep 6" },
-  ];
-  const visibleNotifications = notificationRows.filter((row, index) => filter === "All" || filter === row.category || (filter === "Unread" && index < count));
-  return <>
-    <PageHeader eyebrow="Stay informed" title="Notifications" description="In-app alerts for inventory, households, recognition, and account activity." actions={<Button variant="secondary" onClick={() => gated(() => setCount(0))} icon={<Check size={17} />}>Mark all as read</Button>} />
-    <Card className="notification-card"><div className="tabs notification-tabs">{["All", "Unread", "Pantry", "Household", "Account"].map((tab) => <button key={tab} className={filter === tab ? "active" : ""} onClick={() => setFilter(tab)}>{tab}</button>)}</div>{visibleNotifications.map((row) => { const originalIndex = notificationRows.indexOf(row); return <button className={`notification-row ${originalIndex < count ? "unread" : ""}`} key={row.title} onClick={() => gated(() => setCount(Math.max(0, count - 1)))}><span className={`notification-icon ${row.tone}`}>{row.tone === "warning" ? <Clock3 /> : row.tone === "danger" ? <AlertTriangle /> : row.tone === "success" ? <CheckCircle2 /> : row.tone === "info" ? <Users /> : <ShieldCheck />}</span><span><b>{row.title}</b><p>{row.detail}</p><small>{row.time}</small></span>{originalIndex < count && <i />}</button>; })}{visibleNotifications.length === 0 && <div className="empty-state compact"><CheckCircle2 /><h3>No notifications here</h3><p>Try another filter or check back later.</p></div>}</Card><Card className="disclaimer"><Bell size={19} /><p>These are prototype in-app notifications. Email, push, and background delivery require verified backend scheduling and provider configuration.</p></Card>
-  </>;
+  // Notifications are not yet loaded from Supabase.
+  const notificationRows: {
+    id: string;
+    category: string;
+    title: string;
+    detail: string;
+    time: string;
+  }[] = [];
+
+  const visibleNotifications = notificationRows.filter(
+    (row) =>
+      filter === "All" ||
+      filter === row.category ||
+      filter === "Unread"
+  );
+
+  return (
+    <>
+      <PageHeader
+        eyebrow="Stay informed"
+        title="Notifications"
+        description="Inventory, household, and account notifications."
+        actions={
+          <Button
+            variant="secondary"
+            disabled
+            icon={<Check size={17} />}
+          >
+            Mark all as read
+          </Button>
+        }
+      />
+
+      <Card className="notification-card">
+        <div className="tabs notification-tabs">
+          {["All", "Unread", "Pantry", "Household", "Account"].map(
+            (tab) => (
+              <button
+                key={tab}
+                className={filter === tab ? "active" : ""}
+                onClick={() => setFilter(tab)}
+              >
+                {tab}
+              </button>
+            )
+          )}
+        </div>
+
+        {visibleNotifications.map((row) => (
+          <div className="notification-row" key={row.id}>
+            <span>
+              <b>{row.title}</b>
+              <p>{row.detail}</p>
+              <small>{row.time}</small>
+            </span>
+          </div>
+        ))}
+
+        {visibleNotifications.length === 0 && (
+          <div className="empty-state compact">
+            <Bell />
+            <h3>No notifications loaded</h3>
+            <p>
+              Real notifications will appear here once
+              notification storage and delivery are connected.
+            </p>
+          </div>
+        )}
+      </Card>
+    </>
+  );
 }
 
 type SettingsData = {
@@ -1177,14 +1520,30 @@ useEffect(() => {
     }
 
     if (active) {
-      setCurrentUser(data.session?.user ?? null);
+      const sessionUser = data.session?.user ?? null;
+
+      setCurrentUser(sessionUser);
+
+      if (sessionUser) {
+        setRole("owner");
+        setEntered(true);
+      }
     }
   });
 
   const {
     data: { subscription },
   } = supabase.auth.onAuthStateChange((_event, session) => {
-    setCurrentUser(session?.user ?? null);
+    const sessionUser = session?.user ?? null;
+
+    setCurrentUser(sessionUser);
+
+    if (sessionUser) {
+      setRole("owner");
+      setEntered(true);
+    } else {
+      setRole("guest");
+    }
   });
 
   return () => {
@@ -1252,4 +1611,3 @@ useEffect(() => {
     onExit={() => setEntered(false)}
   />
 );}
-
