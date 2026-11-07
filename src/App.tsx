@@ -589,7 +589,7 @@ function AppShell({ role, user, onRoleChange, onExit }: { role: Role; user: { id
     return () => { active = false; };
   }, [user?.id, role]);
 
-  const addPantryItem = async (input: { name: string; category: string; quantity: number; unit: string; storage: string; expiry: string | null; minimum: number }) => {
+  const addPantryItem = async (input: { name: string; category: string; quantity: number; unit: string; storage: string; purchase_date: string | null; expiry: string | null; minimum: number }) => {
     if (!user || !personalHouseholdId) throw new Error("Personal pantry is not ready. Please try again.");
     const { error } = await supabase.from("pantry_items")
       .insert({ ...input, household_id: personalHouseholdId, created_by: user.id });
@@ -954,13 +954,47 @@ function DetectedItem({ name, confidence, icon }: { name: string; confidence: nu
   return <div className="detected-item"><button className="detected-head" onClick={() => setOpen(!open)}><span>{icon}</span><span><b>{name}</b><small>{confidence}% confidence</small></span><Badge tone="success">High confidence</Badge><ChevronDown className={open ? "rotate" : ""} size={18} /></button>{open && <div className="detected-form"><Input label="Food name" defaultValue={name} /><Select label="Category" defaultValue="Vegetables">{categories.map((c) => <option key={c}>{c}</option>)}</Select><div className="split-fields"><Input label="Quantity" type="number" defaultValue="2" min="0" /><Select label="Unit" defaultValue={defaults.units === "Metric" ? "kilograms" : "pieces"}><option>pieces</option><option>kilograms</option><option>grams</option><option>liters</option><option>milliliters</option><option>cans</option><option>packs</option><option>bunches</option></Select></div><Select label="Storage location"><option>Refrigerator</option>{locations.map((l) => <option key={l}>{l}</option>)}</Select><Input label="Expiration date (from packaging, if known)" type="date" /><p className="field-help">A food photo cannot reliably reveal its actual expiration date.</p></div>}</div>;
 }
 
-function AddItem({ role, gated, notify, navigate, onAdd }: { role: Role; gated: (fn: () => void) => void; notify: (text: string) => void; navigate: (v: View) => void; onAdd: (input: { name: string; category: string; quantity: number; unit: string; storage: string; expiry: string | null; minimum: number }) => Promise<void> }) {
+function AddItem({ role, gated, notify, navigate, onAdd }: { role: Role; gated: (fn: () => void) => void; notify: (text: string) => void; navigate: (v: View) => void; onAdd: (input: { name: string; category: string; quantity: number; unit: string; storage: string; purchase_date: string | null; expiry: string | null; minimum: number }) => Promise<void> }) {
   const [name, setName] = useState("");
+  const [category, setCategory] = useState("");
+  const [storageOverride, setStorageOverride] = useState<string | null>(null);
+  const [purchaseDate, setPurchaseDate] = useState("");
+  const [expiry, setExpiry] = useState("");
   const [defaults] = useState(() => {
     try { return { ...defaultSettings(role), ...JSON.parse(window.localStorage.getItem(`pantrylens-settings-${role}`) || "{}") } as SettingsData; }
     catch { return defaultSettings(role); }
   });
   const [saving, setSaving] = useState(false);
+  const storage = storageOverride ?? defaults.storage;
+  const foodName = name.trim().toLowerCase().replace(/\s+/g, " ");
+
+  const supportedRawFoods = [
+    "raw chicken",
+    "raw chicken pieces",
+    "raw whole chicken",
+    "raw turkey",
+    "raw turkey pieces",
+    "raw whole turkey",
+    "raw ground beef",
+    "raw ground pork",
+    "raw ground chicken",
+    "raw ground turkey",
+  ];
+
+  let suggestedExpiry = "";
+
+  if (
+    category === "Meat" &&
+    storage === "Refrigerator" &&
+    purchaseDate &&
+    supportedRawFoods.includes(foodName)
+  ) {
+    const date = new Date(`${purchaseDate}T00:00:00Z`);
+    if (Number.isFinite(date.getTime())) {
+      date.setUTCDate(date.getUTCDate() + 1);
+      suggestedExpiry = date.toISOString().slice(0, 10);
+    }
+  }
   const submit = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (role === "guest" || saving) { gated(() => {}); return; }
@@ -976,7 +1010,8 @@ function AddItem({ role, gated, notify, navigate, onAdd }: { role: Role; gated: 
     try {
       await onAdd({ name: name.trim(), category, quantity, minimum,
         unit: String(form.get("unit")), storage: String(form.get("storage")),
-        expiry: String(form.get("expiry") || "") || null });
+        purchase_date: String(form.get("purchase_date") || "") || null,
+expiry: String(form.get("expiry") || "") || null });
       notify(`${name.trim()} saved to your personal pantry`);
       navigate("inventory");
     } catch (error) { notify(error instanceof Error ? error.message : "Could not save item"); }
@@ -984,7 +1019,52 @@ function AddItem({ role, gated, notify, navigate, onAdd }: { role: Role; gated: 
   };
   return <>
     <PageHeader eyebrow="Inventory" title="Add food manually" description="Record an item with the details you know. You can update them anytime." />
-    <form className="form-layout" onSubmit={submit}><Card className="form-card"><h2>Item information</h2><p>Fields marked required keep inventory quantities accurate.</p><Input label="Food name *" placeholder="e.g. Chicken, Pork, Eggplant, or Pechay" value={name} onChange={(e) => setName(e.target.value)} required /><Select label="Food category *" name="category" required><option value="">Select category</option>{categories.map((c) => <option key={c}>{c}</option>)}</Select><div className="split-fields"><Input label="Quantity *" name="quantity" type="number" min="0.01" step="0.01" required /><Select label="Unit *" name="unit" defaultValue={defaults.units === "Metric" ? "kilograms" : "pieces"}><option>pieces</option><option>kilograms</option><option>grams</option><option>liters</option><option>milliliters</option><option>cans</option><option>packs</option><option>bunches</option></Select></div><Select label="Storage location *" name="storage" defaultValue={defaults.storage}>{locations.map((l) => <option key={l}>{l}</option>)}</Select><div className="split-fields"><Input label="Purchase date" type="date" /><Input label="Expiration date" name="expiry" type="date" /></div><Input label="Minimum-stock threshold" name="minimum" type="number" min="0" defaultValue={defaults.lowStockDefault} /><label className="field"><span>Notes</span><textarea placeholder="Brand, packaging, or household notes" rows={4} /></label></Card><aside><Card className="image-upload-small"><ImagePlus /><h3>Add an item photo</h3><p>Optional. Images will use Supabase Storage after backend integration.</p><Button variant="secondary" onClick={() => notify("Image picker opened in demo mode")}>Choose image</Button></Card><div className="sticky-actions"><Button variant="secondary" onClick={() => navigate("inventory")}>Cancel</Button><Button type="submit" disabled={saving}>{saving ? "Saving…" : "Add to pantry"}</Button></div></aside></form>
+    <form className="form-layout" onSubmit={submit}><Card className="form-card"><h2>Item information</h2><p>Fields marked required keep inventory quantities accurate.</p><Input label="Food name *" placeholder="e.g. Chicken, Pork, Eggplant, or Pechay" value={name} onChange={(e) => setName(e.target.value)} required /><Select
+      label="Food category *"
+      name="category"
+      value={category}
+      onChange={(event) => setCategory(event.target.value)}
+      required
+    ><option value="">Select category</option>{categories.map((c) => <option key={c}>{c}</option>)}</Select><div className="split-fields"><Input label="Quantity *" name="quantity" type="number" min="0.01" step="0.01" required /><Select label="Unit *" name="unit" defaultValue={defaults.units === "Metric" ? "kilograms" : "pieces"}><option>pieces</option><option>kilograms</option><option>grams</option><option>liters</option><option>milliliters</option><option>cans</option><option>packs</option><option>bunches</option></Select></div><Select
+      label="Storage location *"
+      name="storage"
+      value={storage}
+      onChange={(event) => setStorageOverride(event.target.value)}
+    >{locations.map((l) => <option key={l}>{l}</option>)}</Select><div className="split-fields">
+      <Input
+        label="Purchase date"
+        name="purchase_date"
+        type="date"
+        value={purchaseDate}
+        onChange={(event) => setPurchaseDate(event.target.value)}
+      />
+      <Input
+        label="Expiration date"
+        name="expiry"
+        type="date"
+        value={expiry}
+        onChange={(event) => setExpiry(event.target.value)}
+      />
+    </div>
+
+    {suggestedExpiry && (
+      <div>
+        <p>Suggested reminder date: {suggestedExpiry}</p>
+        <p>
+          This estimate assumes refrigeration at 4°C or below.
+          Follow the package date and storage instructions when available.
+        </p>
+        <Button
+          type="button"
+          variant="secondary"
+          onClick={() => setExpiry(suggestedExpiry)}
+        >
+          Use suggested date
+        </Button>
+      </div>
+    )}
+
+    <Input label="Minimum-stock threshold" name="minimum" type="number" min="0" defaultValue={defaults.lowStockDefault} /><label className="field"><span>Notes</span><textarea placeholder="Brand, packaging, or household notes" rows={4} /></label></Card><aside><Card className="image-upload-small"><ImagePlus /><h3>Add an item photo</h3><p>Optional. Images will use Supabase Storage after backend integration.</p><Button variant="secondary" onClick={() => notify("Image picker opened in demo mode")}>Choose image</Button></Card><div className="sticky-actions"><Button variant="secondary" onClick={() => navigate("inventory")}>Cancel</Button><Button type="submit" disabled={saving}>{saving ? "Saving…" : "Add to pantry"}</Button></div></aside></form>
   </>;
 }
 
