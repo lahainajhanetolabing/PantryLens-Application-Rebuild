@@ -98,8 +98,6 @@ function displayPantryItem(row: PantryRow): Item {
   };
 }
 
-const HERO_IMAGE =
-  "https://images.unsplash.com/photo-1536489885071-87983c3e2859?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=85&w=1400";
 const RECIPE_IMAGES = [
   "https://images.unsplash.com/photo-1585115054153-6b78d6f63985?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=900",
   "https://images.unsplash.com/photo-1668887466922-5ed4bcd58ceb?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=900",
@@ -221,10 +219,30 @@ function Landing({ onEnter, onAuth }: { onEnter: () => void; onAuth: (mode: "log
         <div className="trust-row"><span><Check size={15} /> No credit card</span><span><Check size={15} /> Free prototype</span><span><Check size={15} /> Filipino recipes</span></div>
       </div>
       <div className="hero-visual">
-        <img src={HERO_IMAGE} alt="A Filipino meal with grilled eggplant, okra, rice, and salted egg" />
-        <div className="scan-frame"><span /><span /><span /><span /></div>
-        <div className="floating-card float-top"><span className="food-icon"><ScanLine size={21} /></span><div><b>Eggplant detected</b><small>96% confidence · demo</small></div><CheckCircle2 size={19} /></div>
-        <div className="floating-card float-bottom"><Clock3 size={20} /><div><b>Use soon</b><small>3 items expire this week</small></div></div>
+        <img src="/images/pantry-hero.jpg" alt="Fresh meat and vegetables for PantryLens" />
+        <div className="scan-frame">
+          <span />
+          <span />
+          <span />
+          <span />
+        </div>
+        <div className="floating-card float-top">
+          <span className="food-icon">
+            <ScanLine size={21} />
+          </span>
+          <div>
+            <b>Eggplant detected</b>
+            <small>Detection preview</small>
+          </div>
+          <CheckCircle2 size={19} />
+        </div>
+        <div className="floating-card float-bottom">
+          <Clock3 size={20} />
+          <div>
+            <b>Track freshness</b>
+            <small>Stay informed about expiration dates</small>
+          </div>
+        </div>
       </div>
     </section>
     <section className="brand-strip"><span>See what’s fresh</span><strong>8 pantry items tracked</strong><span>Plan what to cook</span><strong>92% recipe match</strong><span>Waste less</span></section>
@@ -238,7 +256,7 @@ function Landing({ onEnter, onAuth }: { onEnter: () => void; onAuth: (mode: "log
     </section>
     <section className="how-section" id="how">
       <div><div className="eyebrow">Designed for real kitchens</div><h2>One photo. A pantry you can trust.</h2><p>Recognition results are always reviewable. Expiration dates remain yours to enter from the package—PantryLens never pretends a photo can know them.</p><div className="steps"><span><b>01</b> Capture or upload</span><span><b>02</b> Review detected food</span><span><b>03</b> Confirm and organize</span></div><Button onClick={onEnter}>Try the demo scan</Button></div>
-      <div className="demo-scan"><div className="demo-image"><img src={RECIPE_IMAGES[1]} alt="Prepared food for the recognition demonstration" /><span className="box-label">Eggplant · 94%</span></div><div className="demo-result"><Badge tone="info">Demo recognition</Badge><h3>2 items found</h3><div><span className="food-initial">EG</span><b>Eggplant</b><small>94%</small></div><div><span className="food-initial">EE</span><b>Eggs</b><small>89%</small></div></div></div>
+      <div className="demo-scan"><div className="demo-image"><img src="/images/recognition-preview.jpg" alt="Meat and vegetables recognition preview" /><span className="box-label">Eggplant · 94%</span></div><div className="demo-result"><Badge tone="info">Demo recognition</Badge><h3>2 items found</h3><div><span className="food-initial">EG</span><b>Eggplant</b><small>94%</small></div><div><span className="food-initial">EE</span><b>Eggs</b><small>89%</small></div></div></div>
     </section>
     <section className="landing-section" id="recipes">
       <div className="eyebrow">Made for Filipino tables</div><h2>Start with what you already have.</h2>
@@ -932,13 +950,202 @@ function Inventory({ items, role, gated, notify, shared, navigate, onDelete, onU
 function ScanPage({ role, gated, notify, navigate }: { role: Role; gated: (fn: () => void) => void; notify: (text: string) => void; navigate: (v: View) => void }) {
   const [step, setStep] = useState<"upload" | "processing" | "results">("upload");
   const fileRef = useRef<HTMLInputElement>(null);
+  const [scanPhoto, setScanPhoto] = useState("");
+
+  const handleScanPhoto = (file: File | undefined) => {
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result !== "string") return;
+      setScanPhoto(reader.result);
+      setStep("results");
+    };
+    reader.onerror = () => notify("Could not read the photo. Try another image.");
+    reader.readAsDataURL(file);
+  };
   const runScan = () => { setStep("processing"); window.setTimeout(() => setStep("results"), 1500); };
+
+  const videoRef = useRef<HTMLVideoElement>(null);
+  const cameraStreamRef = useRef<MediaStream | null>(null);
+
+  const [cameraOpen, setCameraOpen] = useState(false);
+  const [cameraError, setCameraError] = useState("");
+
+  const openCamera = async () => {
+    setCameraError("");
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        video: { facingMode: "environment" },
+        audio: false,
+      });
+
+      cameraStreamRef.current = stream;
+      setCameraOpen(true);
+    } catch (error) {
+      console.error("Camera error:", error);
+      setCameraError("Unable to open camera. Check camera permissions.");
+    }
+  };
+
+  const closeCamera = () => {
+    cameraStreamRef.current?.getTracks().forEach((track) => {
+      track.stop();
+    });
+
+    cameraStreamRef.current = null;
+    setCameraOpen(false);
+  };
+
+  const capturePhoto = () => {
+    const video = videoRef.current;
+
+    if (!video || video.videoWidth === 0 || video.videoHeight === 0) {
+      setCameraError("Camera is not ready yet. Please try again.");
+      return;
+    }
+
+    const canvas = document.createElement("canvas");
+
+    canvas.width = video.videoWidth;
+    canvas.height = video.videoHeight;
+
+    const context = canvas.getContext("2d");
+
+    if (!context) {
+      setCameraError("Unable to capture photo.");
+      return;
+    }
+
+    context.drawImage(video, 0, 0, canvas.width, canvas.height);
+
+    canvas.toBlob(
+      (blob) => {
+        if (!blob) {
+          setCameraError("Unable to save captured photo.");
+          return;
+        }
+
+        const file = new File(
+          [blob],
+          `pantrylens-${Date.now()}.jpg`,
+          { type: "image/jpeg" }
+        );
+
+        closeCamera();
+        handleScanPhoto(file);
+      },
+      "image/jpeg",
+      0.9
+    );
+  };
+
+  useEffect(() => {
+    if (cameraOpen && videoRef.current && cameraStreamRef.current) {
+      videoRef.current.srcObject = cameraStreamRef.current;
+    }
+  }, [cameraOpen]);
+
+  useEffect(() => {
+    return () => {
+      cameraStreamRef.current?.getTracks().forEach((track) => {
+        track.stop();
+      });
+    };
+  }, []);
+
   return <>
-    <PageHeader eyebrow="Food recognition" title="Scan food items" description="Upload or capture food, then review every result before it reaches your pantry." actions={<Badge tone="info"><Sparkles size={14} /> Simulated recognition service</Badge>} />
+    <PageHeader
+      eyebrow="Food recognition"
+      title="Scan food items"
+      description="Upload or capture food, then review every result before it reaches your pantry."
+    />
     <div className="stepper"><span className={step !== "upload" ? "done" : "active"}><b>{step === "upload" ? "1" : <Check size={15} />}</b> Add image</span><i /><span className={step === "processing" ? "active" : step === "results" ? "done" : ""}><b>2</b> Analyze</span><i /><span className={step === "results" ? "active" : ""}><b>3</b> Confirm details</span></div>
-    {step === "upload" && <Card className="scan-panel"><div className="upload-zone" onClick={() => fileRef.current?.click()}><input ref={fileRef} type="file" accept="image/*" onChange={runScan} /><span className="upload-icon"><ImagePlus /></span><h2>Drop a food photo here</h2><p>or choose a clear image from your device</p><Button variant="secondary" onClick={() => fileRef.current?.click()} icon={<Upload size={17} />}>Choose image</Button><small>JPG, PNG, or HEIC · max 10 MB</small></div><div className="or-divider"><span>or</span></div><Button className="camera-button" onClick={runScan} icon={<Camera size={18} />}>Open camera</Button><div className="scan-tips"><h3>For better recognition</h3><div><span><Sun /></span><p><b>Use good lighting</b><small>Avoid heavy shadows or glare</small></p></div><div><span><Eye /></span><p><b>Keep items visible</b><small>Separate overlapping food when possible</small></p></div><div><span><Pencil /></span><p><b>You stay in control</b><small>Correct labels and enter package dates manually</small></p></div></div></Card>}
+    {step === "upload" && <Card className="scan-panel"><div className="upload-zone" onClick={() => fileRef.current?.click()}><input
+      ref={fileRef}
+      type="file"
+      accept="image/*"
+      onChange={(event) => handleScanPhoto(event.target.files?.[0])}
+    /><span className="upload-icon"><ImagePlus /></span><h2>Drop a food photo here</h2><p>or choose a clear image from your device</p><Button variant="secondary" onClick={() => fileRef.current?.click()} icon={<Upload size={17} />}>Choose image</Button><small>JPG, PNG, or HEIC · max 10 MB</small></div><div className="or-divider"><span>or</span></div>{!cameraOpen ? (
+    <Button
+      className="camera-button"
+      onClick={openCamera}
+      icon={<Camera size={18} />}
+    >
+      Open camera
+    </Button>
+    ) : (
+      <div style={{ width: "100%" }}>
+        <video
+          ref={videoRef}
+          autoPlay
+          playsInline
+          muted
+          style={{
+            display: "block",
+            width: "100%",
+            maxHeight: "420px",
+            objectFit: "cover",
+            borderRadius: "16px",
+            background: "#111",
+          }}
+        />
+
+        <div
+          style={{
+            display: "flex",
+            gap: "12px",
+            marginTop: "20px",
+            justifyContent: "center",
+            flexWrap: "wrap",
+          }}
+        >
+          <Button
+            onClick={capturePhoto}
+            icon={<Camera size={18} />}
+          >
+            Capture photo
+          </Button>
+
+          <Button
+            variant="secondary"
+            onClick={closeCamera}
+          >
+            Close camera
+          </Button>
+        </div>
+      </div>
+    )}
+
+    {cameraError && <p role="alert">{cameraError}</p>}
+    <div className="scan-tips"><h3>For better recognition</h3><div><span><Sun /></span><p><b>Use good lighting</b><small>Avoid heavy shadows or glare</small></p></div><div><span><Eye /></span><p><b>Keep items visible</b><small>Separate overlapping food when possible</small></p></div><div><span><Pencil /></span><p><b>You stay in control</b><small>Correct labels and enter package dates manually</small></p></div></div></Card>}
     {step === "processing" && <Card className="processing-card"><div className="scanner-animation"><ScanLine /><i /></div><h2>Looking closely at your food…</h2><p>Demo model is finding items and estimating labels. This does not infer expiration dates.</p><div className="progress"><span /></div><small>Analyzing image · simulated</small><Button variant="ghost" onClick={() => setStep("upload")}>Cancel</Button></Card>}
-    {step === "results" && <div className="scan-results-layout"><Card className="scan-preview"><div className="preview-image"><img src="https://images.unsplash.com/photo-1545576300-c7744d48aead?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=900" alt="Vegetables in the demo scan" /><span className="detection-box box-one"><b>Eggplant · 96%</b></span><span className="detection-box box-two"><b>Tomato · 91%</b></span></div><div className="preview-actions"><Button variant="secondary" onClick={() => setStep("upload")} icon={<RefreshCw size={17} />}>Replace photo</Button><Button variant="ghost" onClick={() => setStep("upload")} icon={<Trash2 size={17} />}>Remove</Button></div><div className="recognition-note"><CircleHelp size={18} /><span>Confidence is a model estimate, not a guarantee. Check every label before saving.</span></div></Card><div className="result-column"><Card><div className="card-heading"><div><h2>2 items detected</h2><p>Review names, quantities, and dates.</p></div><Badge tone="info">Demo results</Badge></div><DetectedItem name="Eggplant" confidence={96} icon="EG" /><DetectedItem name="Tomatoes" confidence={91} icon="TO" /><button className="add-detected" onClick={() => notify("Blank detected-item form added")}><Plus size={17} /> Add another detected item</button></Card><div className="scan-footer"><Button variant="secondary" onClick={() => setStep("upload")}>Start over</Button><Button onClick={() => gated(() => { notify("2 items added to demo pantry"); navigate("inventory"); })} icon={<Check size={17} />}>Confirm and add 2 items</Button></div></div></div>}
+    {step === "results" && scanPhoto && (
+      <div className="scan-results-layout">
+        <Card className="scan-preview">
+          <div className="preview-image">
+            <img src={scanPhoto} alt="Your uploaded food photo" />
+          </div>
+        </Card>
+
+        <Card className="result-column">
+          <h2>Ingredient result</h2>
+          <p>Ingredient recognition is being set up.</p>
+
+          <Button
+            variant="secondary"
+            onClick={() => {
+              setScanPhoto("");
+              setStep("upload");
+            }}
+          >
+            Choose another photo
+          </Button>
+        </Card>
+      </div>
+    )}
+    {step === "results" && !scanPhoto && <div className="scan-results-layout"><Card className="scan-preview"><div className="preview-image"><img src="https://images.unsplash.com/photo-1545576300-c7744d48aead?crop=entropy&cs=tinysrgb&fit=max&fm=jpg&q=80&w=900" alt="Vegetables in the demo scan" /><span className="detection-box box-one"><b>Eggplant · 96%</b></span><span className="detection-box box-two"><b>Tomato · 91%</b></span></div><div className="preview-actions"><Button variant="secondary" onClick={() => setStep("upload")} icon={<RefreshCw size={17} />}>Replace photo</Button><Button variant="ghost" onClick={() => setStep("upload")} icon={<Trash2 size={17} />}>Remove</Button></div><div className="recognition-note"><CircleHelp size={18} /><span>Confidence is a model estimate, not a guarantee. Check every label before saving.</span></div></Card><div className="result-column"><Card><div className="card-heading"><div><h2>2 items detected</h2><p>Review names, quantities, and dates.</p></div><Badge tone="info">Demo results</Badge></div><DetectedItem name="Eggplant" confidence={96} icon="EG" /><DetectedItem name="Tomatoes" confidence={91} icon="TO" /><button className="add-detected" onClick={() => notify("Blank detected-item form added")}><Plus size={17} /> Add another detected item</button></Card><div className="scan-footer"><Button variant="secondary" onClick={() => setStep("upload")}>Start over</Button><Button onClick={() => gated(() => { notify("2 items added to demo pantry"); navigate("inventory"); })} icon={<Check size={17} />}>Confirm and add 2 items</Button></div></div></div>}
   </>;
 }
 
